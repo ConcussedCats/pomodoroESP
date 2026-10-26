@@ -14,18 +14,18 @@ Reading shared;
 
 // Default table until the cube is calibrated (which face is up for each board axis).
 Face mapping[6] = {
-    Face::SHORT_BREAK,  // +X
-    Face::LONG_BREAK,   // -X
-    Face::DISPLAY,      // +Y
-    Face::TECH,         // -Y
-    Face::WORK,         // +Z
-    Face::PAUSE,        // -Z
+    Face::ShortBreak,  // +X
+    Face::LongBreak,   // -X
+    Face::Display,      // +Y
+    Face::Tech,         // -Y
+    Face::Work,         // +Z
+    Face::Pause,        // -Z
 };
 
 Orientation classify(const mpu6050::Accel& a) {
     const float v[3] = {a.x, a.y, a.z};
     const float norm = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-    if (norm < NORM_MIN_G || norm > NORM_MAX_G) return Orientation::NONE;
+    if (norm < NORM_MIN_G || norm > NORM_MAX_G) return Orientation::None;
 
     int best = 0;
     for (int i = 1; i < 3; i++) {
@@ -36,14 +36,14 @@ Orientation classify(const mpu6050::Accel& a) {
         if (i != best) second = fmaxf(second, fabsf(v[i]));
     }
     const float strength = fabsf(v[best]);
-    if (strength < AXIS_MIN_G || strength - second < AXIS_MARGIN_G) return Orientation::NONE;
+    if (strength < AXIS_MIN_G || strength - second < AXIS_MARGIN_G) return Orientation::None;
     return static_cast<Orientation>(best * 2 + (v[best] < 0 ? 1 : 0));
 }
 
 void task(void*) {
     bool sensorOk = false;
     uint32_t lastInitMs = millis();
-    Orientation candidate = Orientation::NONE;
+    Orientation candidate = Orientation::None;
     uint32_t candidateSinceMs = millis();
     TickType_t wake = xTaskGetTickCount();
 
@@ -64,7 +64,7 @@ void task(void*) {
             log_w("MPU6050 read failed, retrying");
         }
 
-        const Orientation now_o = sensorOk ? classify(accel) : Orientation::NONE;
+        const Orientation now_o = sensorOk ? classify(accel) : Orientation::None;
         if (now_o != candidate) {
             candidate = now_o;
             candidateSinceMs = now;
@@ -75,7 +75,7 @@ void task(void*) {
         shared.accel = accel;
         shared.candidate = candidate;
         shared.candidateSinceMs = candidateSinceMs;
-        if (candidate != Orientation::NONE && candidate != shared.stable &&
+        if (candidate != Orientation::None && candidate != shared.stable &&
             now - candidateSinceMs >= STABLE_MS) {
             shared.stable = candidate;
             const Face face = mapping[static_cast<int>(candidate)];
@@ -115,7 +115,7 @@ Reading read() {
 void setMapping(const Face table[6]) {
     portENTER_CRITICAL(&lock);
     for (int i = 0; i < 6; i++) mapping[i] = table[i];
-    if (shared.stable != Orientation::NONE) {
+    if (shared.stable != Orientation::None) {
         const Face face = mapping[static_cast<int>(shared.stable)];
         if (face != shared.face) {
             shared.face = face;
@@ -127,13 +127,13 @@ void setMapping(const Face table[6]) {
 
 const char* name(Face face) {
     switch (face) {
-        case Face::WORK: return "WORK";
-        case Face::SHORT_BREAK: return "SHORT_BREAK";
-        case Face::LONG_BREAK: return "LONG_BREAK";
-        case Face::PAUSE: return "PAUSE";
-        case Face::DISPLAY: return "DISPLAY";
-        case Face::TECH: return "TECH";
-        case Face::UNKNOWN: return "UNKNOWN";
+        case Face::Work: return "WORK";
+        case Face::ShortBreak: return "SHORT_BREAK";
+        case Face::LongBreak: return "LONG_BREAK";
+        case Face::Pause: return "PAUSE";
+        case Face::Display: return "DISPLAY";
+        case Face::Tech: return "TECH";
+        case Face::Unknown: return "UNKNOWN";
     }
     return "?";
 }

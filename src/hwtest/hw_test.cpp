@@ -28,13 +28,13 @@ uint16_t to565(rgb::Color c) {
 
 rgb::Color faceColor(faces::Face f) {
     switch (f) {
-        case faces::Face::WORK: return rgb::WORK;
-        case faces::Face::SHORT_BREAK: return rgb::SHORT_BREAK;
-        case faces::Face::LONG_BREAK: return rgb::LONG_BREAK;
-        case faces::Face::PAUSE: return lastModeColor;
-        case faces::Face::DISPLAY: return {200, 200, 200};
-        case faces::Face::TECH: return {160, 0, 255};
-        case faces::Face::UNKNOWN: return rgb::OFF;
+        case faces::Face::Work: return rgb::WORK;
+        case faces::Face::ShortBreak: return rgb::SHORT_BREAK;
+        case faces::Face::LongBreak: return rgb::LONG_BREAK;
+        case faces::Face::Pause: return lastModeColor;
+        case faces::Face::Display: return {200, 200, 200};
+        case faces::Face::Tech: return {160, 0, 255};
+        case faces::Face::Unknown: return rgb::OFF;
     }
     return rgb::OFF;
 }
@@ -45,10 +45,10 @@ void setAction(const char* text) {
 }
 
 void onFace(faces::Face f) {
-    if (f == faces::Face::WORK || f == faces::Face::SHORT_BREAK || f == faces::Face::LONG_BREAK) {
+    if (f == faces::Face::Work || f == faces::Face::ShortBreak || f == faces::Face::LongBreak) {
         lastModeColor = faceColor(f);
     }
-    rgb::show(faceColor(f), f == faces::Face::PAUSE ? rgb::Effect::Breathe : rgb::Effect::Solid);
+    rgb::show(faceColor(f), f == faces::Face::Pause ? rgb::Effect::Breathe : rgb::Effect::Solid);
     vibration::ack();
     char text[40];
     snprintf(text, sizeof(text), "face -> %s", faces::name(f));
@@ -130,10 +130,10 @@ void redraw(uint32_t now) {
         row("MPU6050 missing", 46, 4, TFT_RED);
     } else {
         const rgb::Color c = faceColor(r.face);
-        row(faces::name(r.face), 46, 4, r.face == faces::Face::UNKNOWN ? TFT_LIGHTGREY : to565(c));
+        row(faces::name(r.face), 46, 4, r.face == faces::Face::Unknown ? TFT_LIGHTGREY : to565(c));
     }
 
-    if (r.candidate != faces::Orientation::NONE && r.candidate != r.stable) {
+    if (r.candidate != faces::Orientation::None && r.candidate != r.stable) {
         const uint32_t held = now - r.candidateSinceMs;
         snprintf(buf, sizeof(buf), "%s   cand %s %lu/%lu ms", faces::name(r.stable), faces::name(r.candidate),
                  (unsigned long)(held > faces::STABLE_MS ? faces::STABLE_MS : held),
