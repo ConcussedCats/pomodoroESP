@@ -40,8 +40,7 @@ void selectMode(uint8_t m) {
 void play(uint32_t now) {
     switch (mode) {
         case 0:
-            Serial.printf("beep %u Hz, 150 ms
-", buzzer::BASE_FREQ_HZ);
+            Serial.printf("beep %u Hz, 150 ms\n", unsigned(buzzer::BASE_FREQ_HZ));
             buzzer::beep(150);
             break;
         case 1:
