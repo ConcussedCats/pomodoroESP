@@ -8,6 +8,7 @@
 #include <Arduino.h>
 
 #include "buttons/buttons.h"
+#include "pins.h"
 #include "ui/buzzer.h"
 #include "ui/rgb_led.h"
 
@@ -82,6 +83,19 @@ void setup() {
     rgb::setBrightness(60);
     buzzer::begin();
     buttons::begin();
+
+    // Three beeps without any button, LED flashes white with each one.
+    for (int i = 1; i <= 3; i++) {
+        Serial.printf("startup beep %d/3 (2700 Hz)\n", i);
+        rgb::show({255, 255, 255});
+        rgb::update(millis());
+        ledcWriteTone(LEDC_CH_BUZZER, 2700);
+        delay(200);
+        ledcWriteTone(LEDC_CH_BUZZER, 0);
+        rgb::show(rgb::OFF);
+        rgb::update(millis());
+        delay(800);
+    }
     selectMode(0);
 }
 
@@ -90,6 +104,7 @@ void loop() {
 
     buttons::Event e;
     while (buttons::poll(now, e)) {
+        Serial.printf("button %s %s\n", buttons::name(e.button), buttons::name(e.gesture));
         if (e.gesture != buttons::Gesture::Short) continue;
         if (e.button == buttons::Id::S1) play(now);
         else selectMode((mode + 1) % 3);
