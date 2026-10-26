@@ -41,7 +41,10 @@ Orientation classify(const mpu6050::Accel& a) {
 }
 
 void task(void*) {
-    bool sensorOk = false;
+    // begin() already tried the sensor; do not reset it again if it answered.
+    portENTER_CRITICAL(&lock);
+    bool sensorOk = shared.sensorOk;
+    portEXIT_CRITICAL(&lock);
     uint32_t lastInitMs = millis();
     Orientation candidate = Orientation::None;
     uint32_t candidateSinceMs = millis();
