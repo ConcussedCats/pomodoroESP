@@ -2,7 +2,7 @@
 // Buttons (part test 2) drive the test, the LED (part test 1) shows the mode:
 //   S2 short = next mode, S1 short = play the sound of the mode.
 //   mode 1 RED    - single beep 2.7 kHz
-//   mode 2 GREEN  - 8 numbered beeps 2000..4100 Hz (find the loudest one)
+//   mode 2 GREEN  - 8 numbered beeps 3800..5900 Hz (find the loudest one)
 //   mode 3 BLUE   - melodies: start of work (up) / end of phase (down), alternating
 // Serial keys 1/2/3 select a mode, space plays.
 #include <Arduino.h>
@@ -14,14 +14,14 @@
 
 namespace {
 
-constexpr uint16_t SWEEP_START_HZ = 2000;
+constexpr uint16_t SWEEP_START_HZ = 3800;
 constexpr uint16_t SWEEP_STEP_HZ = 300;
 constexpr uint8_t SWEEP_COUNT = 8;
 constexpr uint32_t SWEEP_BEEP_MS = 300;
 constexpr uint32_t SWEEP_GAP_MS = 500;
 
 constexpr rgb::Color MODE_COLORS[] = {{255, 0, 0}, {0, 255, 0}, {0, 0, 255}};
-const char* MODE_NAMES[] = {"single beep 2700 Hz", "sweep: 8 beeps 2000..4100 Hz", "melodies up / down"};
+const char* MODE_NAMES[] = {"single beep (base frequency)", "sweep: 8 beeps 3800..5900 Hz", "melodies up / down"};
 
 uint8_t mode = 0;
 bool nextUp = true;
@@ -40,8 +40,9 @@ void selectMode(uint8_t m) {
 void play(uint32_t now) {
     switch (mode) {
         case 0:
-            Serial.println("beep 2700 Hz, 150 ms");
-            buzzer::beep(150, 2700);
+            Serial.printf("beep %u Hz, 150 ms
+", buzzer::BASE_FREQ_HZ);
+            buzzer::beep(150);
             break;
         case 1:
             Serial.println("sweep start");

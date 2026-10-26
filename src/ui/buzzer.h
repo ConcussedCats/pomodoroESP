@@ -5,7 +5,7 @@
 // Non-blocking: play*() starts a melody, update() advances it from the UI loop.
 namespace buzzer {
 
-constexpr uint16_t BASE_FREQ_HZ = 2700;  // around the piezo resonance
+constexpr uint16_t BASE_FREQ_HZ = 4100;  // loudest step of the sweep on the real piezo
 
 void begin();
 void setEnabled(bool enabled);  // config hardware.soundEnabled
