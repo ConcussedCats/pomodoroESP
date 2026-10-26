@@ -67,7 +67,18 @@ void setup() {
     Serial.println("LED: S1 red, S2 green, both yellow, 3 s blue, 10 s purple");
 
     rgb::begin();
-    rgb::setBrightness(60);
+    rgb::setBrightness(100);
+    // LED self check first, so a loose LED leg is not mistaken for a button problem.
+    const rgb::Color check[] = {{255, 0, 0}, {0, 255, 0}, {0, 0, 255}};
+    const char* names[] = {"RED", "GREEN", "BLUE"};
+    for (int i = 0; i < 3; i++) {
+        Serial.printf("LED check: %s\n", names[i]);
+        rgb::show(check[i]);
+        rgb::update(millis());
+        delay(1000);
+    }
+    rgb::show(rgb::OFF);
+    rgb::update(millis());
     buttons::begin();
     for (auto& s : stats) s.rawLast = digitalRead(s.pin) == LOW;
     Serial.printf("idle levels: S1 %s, S2 %s (both should be HIGH = released)\n",
