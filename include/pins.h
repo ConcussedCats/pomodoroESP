@@ -11,6 +11,8 @@ constexpr int PIN_TFT_MOSI  = 23;  // (TFT_eSPI takes these from build flags in 
 constexpr int PIN_TFT_RST   = 26;
 constexpr int PIN_TFT_DC    = 27;
 constexpr int PIN_TFT_CS    = -1;
+constexpr int PIN_TFT_MISO  = 35;  // not wired; parks the SPI MISO on an unused input-only pin
+                                   // (the default would be GPIO19 = button S1)
 
 constexpr int PIN_LED_R     = 25;  // RGB LED, common cathode, 220 Ohm per leg
 constexpr int PIN_LED_G     = 32;
