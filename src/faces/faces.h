@@ -8,10 +8,11 @@
 // and the whole reading stays the same for >= 600 ms (FIRMWARE-SPEC 3.8).
 namespace faces {
 
-enum class Face : uint8_t { WORK, SHORT_BREAK, LONG_BREAK, PAUSE, DISPLAY, TECH, UNKNOWN };
+// CamelCase values: Arduino.h defines DISPLAY as a macro. Server names come from name().
+enum class Face : uint8_t { Work, ShortBreak, LongBreak, Pause, Display, Tech, Unknown };
 
 // Board orientation = which axis points up (towards the sky) and its sign.
-enum class Orientation : uint8_t { POS_X, NEG_X, POS_Y, NEG_Y, POS_Z, NEG_Z, NONE };
+enum class Orientation : uint8_t { PosX, NegX, PosY, NegY, PosZ, NegZ, None };
 
 constexpr uint32_t STABLE_MS = 600;
 constexpr float AXIS_MIN_G = 0.8f;      // dominant axis must exceed this
@@ -22,10 +23,10 @@ constexpr float NORM_MAX_G = 1.25f;
 struct Reading {
     bool sensorOk = false;
     mpu6050::Accel accel{0, 0, 0};
-    Orientation candidate = Orientation::NONE;  // what the sensor says right now
+    Orientation candidate = Orientation::None;  // what the sensor says right now
     uint32_t candidateSinceMs = 0;
-    Orientation stable = Orientation::NONE;      // last accepted orientation
-    Face face = Face::UNKNOWN;                   // stable orientation mapped to a face
+    Orientation stable = Orientation::None;      // last accepted orientation
+    Face face = Face::Unknown;                   // stable orientation mapped to a face
     uint32_t changes = 0;                        // +1 on every accepted face change
 };
 
