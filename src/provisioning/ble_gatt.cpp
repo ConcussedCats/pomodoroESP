@@ -32,6 +32,9 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer*, ble_gap_conn_desc*) override {
         connected = true;
         newConnection = true;
+        // Keep advertising while connected: Windows keeps a background link to the cube, and
+        // without advertising "Settings > Add device" can never reach it to pair.
+        NimBLEDevice::startAdvertising();
         // No security request from the cube: Windows ignores it and the link drops after the
         // 30 s SMP timeout. Chrome starts pairing itself when the encrypted write is refused.
     }
