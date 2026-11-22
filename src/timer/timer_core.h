@@ -92,6 +92,16 @@ public:
     // Restore a snapshot (stage 3: NVS). Takes the state as is, emits nothing.
     void restore(const State& s) { state_ = s; }
 
+    // After a reboot: take the saved state and tell the server with STATE_SYNC.
+    void restoreAndSync(const State& s);
+
+    // Continue a PAUSED phase up to an absolute end on the epoch clock (restore after a
+    // reboot once the time is known). Already over -> FINISHED. Needs a synced clock.
+    bool continueUntilEpoch(int64_t endsAtEpoch);
+
+    // End of the running phase on the epoch clock, NONE if not running or no clock.
+    int64_t epochEndsAt() const;
+
 private:
     State fresh(Mode mode, Status status) const;
     void emit(EventType type, faces::Face face = faces::Face::Unknown);

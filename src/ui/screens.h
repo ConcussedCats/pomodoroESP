@@ -30,6 +30,11 @@ void invalidate();
 void followOrientation(faces::Orientation o);
 uint8_t rotation();
 
+// Rotation per orientation (+X, -X, +Y, -Y, +Z, -Z), 0..3 or -1 = keep. Stored in NVS.
+void setRotationTable(const int8_t table[6]);
+void getRotationTable(int8_t out[6]);
+void defaultRotationTable(int8_t out[6]);
+
 Screen forFace(faces::Face face);  // DISPLAY -> Info, TECH -> Tech, others -> Main
 
 }  // namespace screens

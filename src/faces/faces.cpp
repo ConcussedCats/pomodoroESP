@@ -12,10 +12,10 @@ constexpr uint32_t REINIT_EVERY_MS = 1000;  // retry a missing / failed sensor
 portMUX_TYPE lock = portMUX_INITIALIZER_UNLOCKED;
 Reading shared;
 
-// Default table until the cube is calibrated and the table is stored in NVS.
+// Default table until a calibration is stored in NVS (storage::saveFaceMap).
 // Recorded on the breadboard rig (2026-11-22): lying flat = PAUSE, the four tilts are
 // WORK / SHORT_BREAK / LONG_BREAK / DISPLAY, upside down = TECH.
-Face mapping[6] = {
+constexpr Face DEFAULT_MAPPING[6] = {
     Face::Display,     // +X
     Face::Work,        // -X
     Face::LongBreak,   // +Y
@@ -23,6 +23,8 @@ Face mapping[6] = {
     Face::Pause,       // +Z  flat on the desk
     Face::Tech,        // -Z  upside down
 };
+Face mapping[6] = {DEFAULT_MAPPING[0], DEFAULT_MAPPING[1], DEFAULT_MAPPING[2],
+                   DEFAULT_MAPPING[3], DEFAULT_MAPPING[4], DEFAULT_MAPPING[5]};
 
 Orientation classify(const mpu6050::Accel& a) {
     const float v[3] = {a.x, a.y, a.z};
@@ -115,6 +117,16 @@ Reading read() {
     const Reading copy = shared;
     portEXIT_CRITICAL(&lock);
     return copy;
+}
+
+void getMapping(Face out[6]) {
+    portENTER_CRITICAL(&lock);
+    for (int i = 0; i < 6; i++) out[i] = mapping[i];
+    portEXIT_CRITICAL(&lock);
+}
+
+void defaultMapping(Face out[6]) {
+    for (int i = 0; i < 6; i++) out[i] = DEFAULT_MAPPING[i];
 }
 
 void setMapping(const Face table[6]) {

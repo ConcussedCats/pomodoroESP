@@ -187,13 +187,14 @@ void invalidate() {
 namespace {
 // Rotation per board orientation (+X, -X, +Y, -Y, +Z, -Z); -1 = keep the current one.
 // Opposite tilts differ by 180 deg, neighbouring tilts by 90 deg.
-constexpr int8_t ROTATION_FOR[6] = {2, 0, 1, 3, -1, -1};
+constexpr int8_t DEFAULT_ROTATION[6] = {2, 0, 1, 3, -1, -1};  // breadboard rig
+int8_t rotationFor[6] = {2, 0, 1, 3, -1, -1};
 uint8_t currentRotation = 0;
 }  // namespace
 
 void followOrientation(faces::Orientation o) {
     if (o == faces::Orientation::None) return;
-    const int8_t r = ROTATION_FOR[static_cast<int>(o)];
+    const int8_t r = rotationFor[static_cast<int>(o)];
     if (r < 0 || uint8_t(r) == currentRotation) return;
     currentRotation = uint8_t(r);
     t().setRotation(currentRotation);
@@ -202,6 +203,18 @@ void followOrientation(faces::Orientation o) {
 
 uint8_t rotation() {
     return currentRotation;
+}
+
+void setRotationTable(const int8_t table[6]) {
+    for (int i = 0; i < 6; i++) rotationFor[i] = table[i] < -1 || table[i] > 3 ? -1 : table[i];
+}
+
+void getRotationTable(int8_t out[6]) {
+    for (int i = 0; i < 6; i++) out[i] = rotationFor[i];
+}
+
+void defaultRotationTable(int8_t out[6]) {
+    for (int i = 0; i < 6; i++) out[i] = DEFAULT_ROTATION[i];
 }
 
 Screen forFace(faces::Face face) {
