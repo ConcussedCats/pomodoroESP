@@ -38,7 +38,9 @@ using timer::Status;
 constexpr uint32_t LOOP_MS = 5;
 constexpr uint32_t TOAST_MS = 2500;
 constexpr uint8_t DEFAULT_BRIGHTNESS = 60;
-constexpr uint32_t CHECKPOINT_MS = 60000;  // NVS save while counting down (flash wear vs. lost time)
+// NVS save while counting down: at most this much is lost on power-off when there is no clock.
+// ~8600 small writes a day, which the NVS wear levelling spreads over its pages.
+constexpr uint32_t CHECKPOINT_MS = 10000;
 
 uint32_t eventsThisBoot = 0;
 uint32_t bootCounter = 0;
