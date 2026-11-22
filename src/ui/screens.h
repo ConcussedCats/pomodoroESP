@@ -16,7 +16,7 @@ struct View {
     uint32_t remainingSeconds;
     faces::Face face;
     bool sensorOk;
-    uint32_t eventsThisBoot;
+    uint32_t queuedEvents;
     const char* toast;  // short message on the bottom line, nullptr = none
     const char* wifiLine;  // "home-net -61 dBm", "connecting", "WIFI_AUTH_FAILED", "not set"
     bool wifiOk;

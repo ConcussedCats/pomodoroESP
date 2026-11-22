@@ -9,6 +9,8 @@
 #include "provisioning/ble_gatt.h"
 #include "provisioning/provisioning.h"
 #include "faces/faces.h"
+#include "events/event_protocol.h"
+#include "events/event_queue.h"
 #include "storage/storage.h"
 #include "sync/config.h"
 #include "sync/sync.h"
@@ -50,6 +52,16 @@ constexpr uint32_t CHECKPOINT_MS = 10000;
 
 uint32_t eventsThisBoot = 0;
 uint32_t bootCounter = 0;
+char bootId[37] = "";
+uint32_t eventSeq = 0;
+events::Queue eventQueue({
+    [](uint8_t& head, uint8_t& count) { return storage::loadEventMeta(head, count); },
+    [](uint8_t head, uint8_t count) { storage::saveEventMeta(head, count); },
+    [](uint8_t slot, events::Event& event) { return storage::loadEventSlot(slot, event); },
+    [](uint8_t slot, const events::Event& event) { storage::saveEventSlot(slot, event); },
+});
+events::Batch publishedBatch;
+uint32_t publishedQueueRevision = 0;
 bool saveDue = false;
 uint32_t lastSaveMs = 0;
 
@@ -101,7 +113,17 @@ void onTimerEvent(EventType type, faces::Face face) {
     eventsThisBoot++;
     saveDue = true;  // written from the loop, not from inside the timer
     const timer::State& s = core.state();
-    // Stage 6 turns this into the outbound event queue (bootId / seq / eventId).
+    events::Event event;
+    snprintf(event.bootId, sizeof(event.bootId), "%s", bootId);
+    device::newUuid(event.eventId);
+    event.seq = ++eventSeq;
+    event.type = type;
+    event.face = face;
+    event.occurredAt = timesync::epochMs();
+    event.state = s;
+    event.state.localEndsAt = timer::NONE;
+    event.endsAt = core.serverEndsAt();
+    eventQueue.enqueue(event);
     Serial.printf("[event] %-14s face=%-11s mode=%-11s status=%-8s remaining=%lu session=%s\n", timer::name(type),
                   type == EventType::FaceChanged ? faces::name(face) : "-", timer::name(s.mode), timer::name(s.status),
                   (unsigned long)core.remainingSeconds(), s.sessionId[0] ? s.sessionId : "null");
@@ -285,11 +307,12 @@ bool parseAndApplyConfig(const char* json, bool allowState, bool persist) {
 }
 
 void processSync() {
-    devicesync::Update update;
+    static devicesync::Update update;
     if (!devicesync::takeUpdate(update)) return;
     if (update.unauthorized) {
         Serial.println("sync: device unauthorized, clearing secret and returning to provisioning");
         storage::clearDevice();
+        eventQueue.clear();
         devicesync::reloadCredentials();
         appliedConfigHash[0] = '\0';
         provisioning::start();
@@ -301,7 +324,40 @@ void processSync() {
         Serial.printf("sync: %lu pending command(s); polling comes in stage 7\n",
                       (unsigned long)update.pendingCommands);
     }
+    if (update.hasEventResponse) {
+        const uint8_t handled = events::terminalPrefix(update.eventResponse, publishedBatch);
+        if (handled) {
+            eventQueue.removeOldest(handled);
+            Serial.printf("sync: server handled %u event(s), %u remain queued\n", handled, eventQueue.size());
+        } else {
+            Serial.println("sync: event response did not acknowledge the oldest queued event");
+            devicesync::retryEvents();
+        }
+    }
     if (update.hasConfig) parseAndApplyConfig(update.configJson, mayAdoptServerState, true);
+}
+
+void publishEventQueue() {
+    if (core.hasClockOffset()) {
+        const int64_t serverNow = device::monotonicMs() + core.clockOffset();
+        const uint8_t expired = eventQueue.dropExpired(serverNow);
+        if (expired) Serial.printf("sync: dropped %u event(s) older than 30 days\n", expired);
+    }
+    if (publishedQueueRevision == eventQueue.revision()) return;
+    publishedQueueRevision = eventQueue.revision();
+    if (eventQueue.size() == 0) {
+        publishedBatch = events::Batch{};
+        devicesync::publishEvents(nullptr);
+        return;
+    }
+    static char request[devicesync::EVENT_REQUEST_SIZE];
+    events::Batch batch;
+    if (!events::buildRequest(eventQueue, request, sizeof(request), batch)) {
+        Serial.println("sync: could not build event batch");
+        return;
+    }
+    publishedBatch = batch;
+    devicesync::publishEvents(request);
 }
 
 void publishSyncSnapshot() {
@@ -503,6 +559,8 @@ void setup() {
     Serial.printf("\n=== Telos cube %s, hardware id %s ===\n", FIRMWARE_VERSION, device::hardwareId());
     storage::begin();
     bootCounter = storage::bumpBootCounter();
+    device::newUuid(bootId);
+    eventQueue.begin();
     Serial.printf("boot #%lu\n", (unsigned long)bootCounter);
 
     rgb::begin();
@@ -577,6 +635,7 @@ void loop() {
     continuePendingPhase();
     core.tick();
     processSync();
+    publishEventQueue();
     publishSyncSnapshot();
 
     if (provisioning::active()) screen = screens::Screen::Provisioning;
@@ -591,7 +650,7 @@ void loop() {
     char endsAt[8];
     timesync::formatLocal(core.epochEndsAt(), endsAt, sizeof(endsAt));
 
-    screens::View v{screen,  &core.state(),     core.remainingSeconds(), core.face(), r.sensorOk, eventsThisBoot,
+    screens::View v{screen,  &core.state(),     core.remainingSeconds(), core.face(), r.sensorOk, eventQueue.size(),
                     toast,   wifiLine,          wifi::connected(),       devicesync::name(devicesync::status()), timeLine,    endsAt,
                     blegatt::name(),            provisioning::status()};
     screens::render(v);
