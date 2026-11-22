@@ -358,6 +358,12 @@ void cmdWifi(const char* a) {
         });
         return;
     }
+    if (strncmp(a, "drop", 4) == 0) {
+        const int seconds = atoi(a + 4) > 0 ? atoi(a + 4) : 20;
+        wifi::simulateOutage(uint32_t(seconds) * 1000);
+        Serial.printf("Wi-Fi dropped for %d s\n", seconds);
+        return;
+    }
     if (strcmp(a, "forget") == 0) {
         wifi::forget();
         Serial.println("Wi-Fi credentials erased");
@@ -369,11 +375,11 @@ void cmdWifi(const char* a) {
     timesync::formatLocal(timesync::epochMs(), now, sizeof(now));
     Serial.printf("Wi-Fi: %s (%s), clock: %s\n", wifi::name(wifi::state()), line,
                   timesync::synced() ? now : "not synced");
-    Serial.println("usage: wifi | wifi set <ssid> | wifi forget");
+    Serial.println("usage: wifi | wifi set <ssid> | wifi drop [s] | wifi forget");
 }
 
 void setupConsole() {
-    console::add("wifi", "wifi | wifi set <ssid> | wifi forget", cmdWifi);
+    console::add("wifi", "wifi | wifi set <ssid> | wifi drop [s] | wifi forget", cmdWifi);
     console::add("status", "boot counter, timer, calibration", cmdStatus);
     console::add("face", "face <axis> <FACE>, e.g. face -X WORK", cmdFace);
     console::add("rot", "rot <axis> <0|90|180|270|keep>", cmdRot);

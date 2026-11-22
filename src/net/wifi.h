@@ -22,6 +22,9 @@ void loop(uint32_t nowMs);
 void setCredentials(const char* ssid, const char* password);
 void forget();
 
+// Debug: drop the connection and keep it down for `ms`, as if the router disappeared.
+void simulateOutage(uint32_t ms);
+
 State state();
 Failure lastFailure();
 const char* ssid();  // "" when off

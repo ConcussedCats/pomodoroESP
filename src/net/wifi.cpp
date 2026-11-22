@@ -22,6 +22,7 @@ Failure failure = Failure::None;
 uint32_t attemptStartMs = 0;
 uint32_t retryAtMs = 0;
 uint32_t backoffMs = BACKOFF_FIRST_MS;
+uint32_t outageUntilMs = 0;  // debug outage: no attempts before this
 
 // Written from the Wi-Fi event task.
 volatile uint8_t disconnectReason = 0;
@@ -111,7 +112,7 @@ void loop(uint32_t now) {
             }
             break;
         case State::Waiting:
-            if (int32_t(now - retryAtMs) >= 0) startAttempt(now);
+            if (int32_t(now - retryAtMs) >= 0 && int32_t(now - outageUntilMs) >= 0) startAttempt(now);
             break;
     }
 }
@@ -135,6 +136,13 @@ void forget() {
     WiFi.disconnect(false, false);
     current = State::Off;
     failure = Failure::None;
+}
+
+void simulateOutage(uint32_t ms) {
+    if (current == State::Off) return;
+    const uint32_t now = millis();
+    outageUntilMs = now + ms;
+    scheduleRetry(now, Failure::Timeout);
 }
 
 State state() {
