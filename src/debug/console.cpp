@@ -79,11 +79,13 @@ void poll() {
             run();
             length = 0;
         } else if (c == '\b' || c == 0x7F) {
+            // Remove a whole UTF-8 character (continuation bytes are 10xxxxxx), e.g. Cyrillic.
+            while (length > 0 && (uint8_t(line[length - 1]) & 0xC0) == 0x80) length--;
             if (length > 0) {
                 length--;
                 Serial.print("\b \b");
             }
-        } else if (length + 1 < MAX_LINE && c >= 0x20) {
+        } else if (length + 1 < MAX_LINE && uint8_t(c) >= 0x20) {
             line[length++] = c;
             Serial.print(secretHandler ? '*' : c);
         }
