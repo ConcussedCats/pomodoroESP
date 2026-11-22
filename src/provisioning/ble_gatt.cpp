@@ -27,6 +27,9 @@ char payload[MAX_PAYLOAD + 1];
 char bleName[20] = "";
 
 NimBLECharacteristic* statusChr = nullptr;
+NimBLECharacteristic* infoChr = nullptr;
+NimBLEServer* bleServer = nullptr;
+bool initialized = false;
 
 // NimBLE's setValue(const T&) copies sizeof(T) bytes: a char* would store the pointer and a
 // char[] the whole array with its trailing zeros. Always pass the text bytes explicitly.
@@ -38,9 +41,9 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer*, ble_gap_conn_desc*) override {
         connected = true;
         newConnection = true;
-        // Keep advertising while connected: Windows keeps a background link to the cube, and
-        // without advertising "Settings > Add device" can never reach it to pair.
-        NimBLEDevice::startAdvertising();
+        // Keep advertising while connected (only while provisioning): Windows keeps a background
+        // link to the cube, and without advertising "Settings > Add device" cannot reach it.
+        if (isRunning) NimBLEDevice::startAdvertising();
         // No security request from the cube: Windows ignores it and the link drops after the
         // 30 s SMP timeout. Chrome starts pairing itself when the encrypted write is refused.
     }
@@ -104,6 +107,16 @@ const char* name() {
 
 void start(const char* deviceInfoJson) {
     if (isRunning) return;
+    if (initialized) {
+        // The stack stays up after stop(): only refresh the values and advertise again.
+        setText(infoChr, deviceInfoJson);
+        setText(statusChr, "{\"state\":\"IDLE\",\"errorCode\":null}");
+        bleServer->advertiseOnDisconnect(true);
+        NimBLEDevice::getAdvertising()->start();
+        isRunning = true;
+        log_i("BLE: advertising again as %s", name());
+        return;
+    }
     NimBLEDevice::init(name());
     useStaticRandomAddress();
     // LE Secure Connections, "Just Works" (the cube has no keypad), with bonding: Windows always
@@ -113,12 +126,12 @@ void start(const char* deviceInfoJson) {
     NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
     NimBLEDevice::setMTU(517);
 
-    NimBLEServer* server = NimBLEDevice::createServer();
-    server->setCallbacks(&serverCallbacks, false);
-    NimBLEService* svc = server->createService(SERVICE_UUID);
+    bleServer = NimBLEDevice::createServer();
+    bleServer->setCallbacks(&serverCallbacks, false);
+    NimBLEService* svc = bleServer->createService(SERVICE_UUID);
 
-    NimBLECharacteristic* info = svc->createCharacteristic(INFO_UUID, NIMBLE_PROPERTY::READ);
-    setText(info, deviceInfoJson);
+    infoChr = svc->createCharacteristic(INFO_UUID, NIMBLE_PROPERTY::READ);
+    setText(infoChr, deviceInfoJson);
 
     NimBLECharacteristic* prov = svc->createCharacteristic(
         PROVISIONING_UUID, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_ENC, MAX_PAYLOAD);
@@ -135,18 +148,22 @@ void start(const char* deviceInfoJson) {
     adv->addServiceUUID(SERVICE_UUID);
     adv->setScanResponse(true);  // the 128-bit UUID and the name do not both fit one packet
     adv->start();
+    initialized = true;
     isRunning = true;
     log_i("BLE: advertising as %s", name());
 }
 
+// Stops advertising and drops the connections. The stack is NOT deinitialised: freeing it while
+// a central (Chrome / Windows) is still connected crashed the cube (a late GAP event called into
+// a deleted server).
 void stop() {
     if (!isRunning) return;
-    NimBLEDevice::getAdvertising()->stop();
-    NimBLEDevice::deinit(true);
-    statusChr = nullptr;
     isRunning = false;
+    bleServer->advertiseOnDisconnect(false);
+    NimBLEDevice::getAdvertising()->stop();
+    for (uint16_t id : bleServer->getPeerDevices()) bleServer->disconnect(id);
     connected = false;
-    log_i("BLE: stopped");
+    log_i("BLE: stopped advertising");
 }
 
 bool running() {
