@@ -6,6 +6,8 @@
 #include "clock/timesync.h"
 #include "core/device.h"
 #include "net/wifi.h"
+#include "provisioning/ble_gatt.h"
+#include "provisioning/provisioning.h"
 #include "faces/faces.h"
 #include "storage/storage.h"
 #include "timer/snapshot.h"
@@ -121,8 +123,18 @@ void onTimerEvent(EventType type, faces::Face face) {
     }
 }
 
+bool ledProvisioning = false;
+
 void updateLed() {
     const timer::State& s = core.state();
+    // Provisioning: blue blinking (FIRMWARE-SPEC 3.10) instead of the timer colours.
+    const bool prov = provisioning::active();
+    if (prov != ledProvisioning) {
+        ledProvisioning = prov;
+        ledValid = false;
+        if (prov) rgb::show(rgb::PROVISIONING, rgb::Effect::BlinkSlow);
+    }
+    if (prov) return;
     if (ledValid && s.mode == ledMode && s.status == ledStatus) return;
     ledValid = true;
     ledMode = s.mode;
@@ -149,7 +161,17 @@ void onButton(const buttons::Event& e, uint32_t now) {
                                                            : screens::Screen::Main;
                 break;
             case Gesture::HoldStart3s: buzzer::beep(60); break;
-            case Gesture::Long: showToast("Bluetooth comes in stage 4", now); break;
+            case Gesture::Long:
+                // Hold 3 s: Bluetooth for re-pairing; again on a paired cube: cancel.
+                if (!provisioning::active()) {
+                    provisioning::start();
+                    showToast("Bluetooth on: add the cube on the site", now);
+                } else if (storage::hasSecret()) {
+                    provisioning::cancel();
+                    screens::invalidate();
+                    showToast("Bluetooth off", now);
+                }
+                break;
             case Gesture::VeryLong: showToast("Factory reset comes in stage 9", now); break;
         }
         return;
@@ -416,8 +438,16 @@ void setup() {
                   (unsigned long)d.shortBreakSeconds, (unsigned long)d.longBreakSeconds);
 
     restoreTimer();
+    provisioning::begin([](int64_t serverTime) { core.setClockOffset(serverTime - device::monotonicMs()); });
     timesync::begin();
     wifi::begin();
+    if (storage::hasSecret()) {
+        Serial.println("paired: yes");
+    } else {
+        // No device secret: the cube waits for the website (FIRMWARE-SPEC 2.1, PROVISIONING).
+        Serial.printf("paired: no, Bluetooth provisioning as %s\n", blegatt::name());
+        provisioning::start();
+    }
     if (!faces::begin()) Serial.println("MPU6050 not found, faces disabled until it answers");
 #ifdef TELOS_DEBUG
     setupConsole();
@@ -440,14 +470,19 @@ void loop() {
         screens::followOrientation(r.stable);
         Serial.printf("[face] axis %s -> %s, screen rotation %u\n", faces::name(r.stable), faces::name(r.face),
                       screens::rotation() * 90);
-        core.applyFace(r.face);
+        // The timer does not react to faces while provisioning (FIRMWARE-SPEC 2.1).
+        if (!provisioning::active()) core.applyFace(r.face);
     }
     wifi::loop(now);
     timesync::loop();
+    const bool wasProvisioning = provisioning::active();
+    provisioning::loop(now);
+    if (wasProvisioning && !provisioning::active()) screens::invalidate();
     continuePendingPhase();
     core.tick();
 
-    if (!manualScreen) screen = screens::forFace(core.face());
+    if (provisioning::active()) screen = screens::Screen::Provisioning;
+    else if (!manualScreen || screen == screens::Screen::Provisioning) screen = screens::forFace(core.face());
     if (toast && int32_t(now - toastUntilMs) >= 0) toast = nullptr;
 
     char wifiLine[40];
@@ -459,7 +494,8 @@ void loop() {
     timesync::formatLocal(core.epochEndsAt(), endsAt, sizeof(endsAt));
 
     screens::View v{screen,  &core.state(),     core.remainingSeconds(), core.face(), r.sensorOk, eventsThisBoot,
-                    toast,   wifiLine,          wifi::connected(),       timeLine,    endsAt};
+                    toast,   wifiLine,          wifi::connected(),       timeLine,    endsAt,
+                    blegatt::name(),            provisioning::status()};
     screens::render(v);
 
     saveTimerIfDue(now);

@@ -8,7 +8,7 @@
 // screen or the timer phase changes, and the numbers once per second, so nothing flickers.
 namespace screens {
 
-enum class Screen : uint8_t { Main, Info, Tech };
+enum class Screen : uint8_t { Main, Info, Tech, Provisioning };
 
 struct View {
     Screen screen;
@@ -22,6 +22,8 @@ struct View {
     bool wifiOk;
     const char* timeLine;  // "14:05" or "not synced"
     const char* endsAt;    // local end of the running phase "14:30", "" if unknown
+    const char* bleName;   // Provisioning: "Telos-Cube-918C"
+    const char* provisioningStatus;  // Provisioning: "WIFI_CONNECTING", ...
 };
 
 void begin();

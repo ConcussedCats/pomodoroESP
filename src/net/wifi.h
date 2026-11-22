@@ -18,8 +18,13 @@ enum class Failure : uint8_t { None, AuthFailed, NotFound, Timeout };
 void begin();  // loads credentials from NVS and starts connecting if there are any
 void loop(uint32_t nowMs);
 
-// Store new credentials and connect to them now (debug console now, BLE in stage 4).
+// Store new credentials and connect to them now (debug console).
 void setCredentials(const char* ssid, const char* password);
+// Provisioning: connect to new credentials without saving them; persistCurrent() saves them
+// after pairing succeeded, restoreSaved() goes back to the stored network after a failure.
+void tryCredentials(const char* ssid, const char* password);
+void persistCurrent();
+void restoreSaved();
 void forget();
 
 // Debug: drop the connection and keep it down for `ms`, as if the router disappeared.
