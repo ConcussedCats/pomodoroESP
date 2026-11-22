@@ -10,6 +10,8 @@
 #include "provisioning/provisioning.h"
 #include "faces/faces.h"
 #include "storage/storage.h"
+#include "sync/config.h"
+#include "sync/sync.h"
 #include "timer/snapshot.h"
 #include "timer/timer_core.h"
 #include "ui/buzzer.h"
@@ -60,6 +62,8 @@ constexpr uint32_t NO_WIFI_FLASH_EVERY_MS = 5000;
 constexpr uint16_t NO_WIFI_FLASH_MS = 150;
 uint32_t lastNoWifiFlashMs = 0;
 uint32_t lastFaceChanges = 0;
+char appliedConfigHash[65] = "";
+bool mayAdoptServerState = true;
 
 // Screen: follows the face (DISPLAY / TECH); the blue button switches manually until the next flip.
 bool manualScreen = false;
@@ -208,15 +212,15 @@ void loadCalibration() {
     }
 }
 
-void restoreTimer() {
+bool restoreTimer() {
     timer::Saved saved;
     if (!storage::loadTimer(saved)) {
         Serial.println("timer: nothing saved");
-        return;
+        return false;
     }
     if (saved.status == Status::Stopped) {
         Serial.println("timer: saved idle, starting fresh");
-        return;
+        return true;
     }
     const bool exact = saved.status == Status::Running && saved.endsAtEpoch != timer::NONE;
     Serial.printf("timer: restoring %s %s, %lu s left%s\n", timer::name(saved.mode), timer::name(saved.status),
@@ -229,6 +233,86 @@ void restoreTimer() {
         pendingEndsAt = saved.endsAtEpoch;
         memcpy(pendingSession, saved.sessionId, sizeof(pendingSession));
     }
+    return true;
+}
+
+void applyConfig(const syncconfig::DeviceConfig& config, bool applyState) {
+    if (config.hasTimer) core.configure(config.durations);
+    if (config.hasHardware) {
+        vibration::setEnabled(config.vibrationEnabled);
+        buzzer::setEnabled(config.soundEnabled);
+        rgb::setBrightness(config.rgbBrightness);
+    }
+    if (config.hasFaces) {
+        for (uint8_t i = 0; i < 6; i++) {
+            core.configureFaceAction(static_cast<faces::Face>(i), config.faceActions[i]);
+        }
+    }
+    if (config.hash[0]) snprintf(appliedConfigHash, sizeof(appliedConfigHash), "%s", config.hash);
+    if (!applyState || !config.hasState) return;
+
+    timer::State state = config.state;
+    if (state.status == Status::Running) {
+        state.localEndsAt = config.stateEndsAt != timer::NONE && core.hasClockOffset()
+                                ? config.stateEndsAt - core.clockOffset()
+                                : device::monotonicMs() + int64_t(state.remainingSeconds) * 1000;
+    }
+    core.restore(state);
+    core.tick();
+    saveDue = true;
+    mayAdoptServerState = false;
+    Serial.println("config: adopted server timer state (no local state existed)");
+}
+
+bool parseAndApplyConfig(const char* json, bool allowState, bool persist) {
+    syncconfig::DeviceConfig config;
+    char error[64];
+    if (!syncconfig::parse(json, config, error, sizeof(error))) {
+        Serial.printf("config: rejected: %s\n", error);
+        return false;
+    }
+    if (!config.hash[0]) {
+        Serial.println("config: rejected: missing configHash");
+        return false;
+    }
+    if (persist && config.serverTime != timer::NONE) core.setClockOffset(config.serverTime - device::monotonicMs());
+    applyConfig(config, allowState);
+    if (persist) storage::saveConfig(json, config.hash);
+    Serial.printf("config: applied %s (work %lu s, short %lu s, long %lu s, RGB %u%%)\n", config.hash,
+                  (unsigned long)core.durations().workSeconds, (unsigned long)core.durations().shortBreakSeconds,
+                  (unsigned long)core.durations().longBreakSeconds, rgb::brightness());
+    return true;
+}
+
+void processSync() {
+    devicesync::Update update;
+    if (!devicesync::takeUpdate(update)) return;
+    if (update.unauthorized) {
+        Serial.println("sync: device unauthorized, clearing secret and returning to provisioning");
+        storage::clearDevice();
+        devicesync::reloadCredentials();
+        appliedConfigHash[0] = '\0';
+        provisioning::start();
+        screens::invalidate();
+        return;
+    }
+    if (update.hasServerTime) core.setClockOffset(update.serverTime - device::monotonicMs());
+    if (update.pendingCommands > 0) {
+        Serial.printf("sync: %lu pending command(s); polling comes in stage 7\n",
+                      (unsigned long)update.pendingCommands);
+    }
+    if (update.hasConfig) parseAndApplyConfig(update.configJson, mayAdoptServerState, true);
+}
+
+void publishSyncSnapshot() {
+    devicesync::Snapshot snapshot;
+    snapshot.state = core.state();
+    snapshot.endsAt = core.serverEndsAt();
+    snapshot.face = core.face();
+    snapshot.wifiConnected = wifi::connected();
+    snapshot.wifiRssi = wifi::rssi();
+    snprintf(snapshot.configHash, sizeof(snapshot.configHash), "%s", appliedConfigHash);
+    devicesync::publish(snapshot);
 }
 
 void continuePendingPhase() {
@@ -437,10 +521,19 @@ void setup() {
     Serial.printf("durations: work %lu s, short break %lu s, long break %lu s\n", (unsigned long)d.workSeconds,
                   (unsigned long)d.shortBreakSeconds, (unsigned long)d.longBreakSeconds);
 
-    restoreTimer();
+    char savedConfig[devicesync::CONFIG_JSON_SIZE] = "";
+    char savedHash[65] = "";
+    if (storage::loadConfig(savedConfig, sizeof(savedConfig), savedHash)) {
+        parseAndApplyConfig(savedConfig, false, false);
+    }
+    mayAdoptServerState = !restoreTimer();
+    if (mayAdoptServerState && savedConfig[0]) {
+        parseAndApplyConfig(savedConfig, true, false);
+    }
     provisioning::begin([](int64_t serverTime) { core.setClockOffset(serverTime - device::monotonicMs()); });
     timesync::begin();
     wifi::begin();
+    devicesync::begin();
     if (storage::hasSecret()) {
         Serial.println("paired: yes");
     } else {
@@ -477,9 +570,14 @@ void loop() {
     timesync::loop();
     const bool wasProvisioning = provisioning::active();
     provisioning::loop(now);
-    if (wasProvisioning && !provisioning::active()) screens::invalidate();
+    if (wasProvisioning && !provisioning::active()) {
+        devicesync::reloadCredentials();
+        screens::invalidate();
+    }
     continuePendingPhase();
     core.tick();
+    processSync();
+    publishSyncSnapshot();
 
     if (provisioning::active()) screen = screens::Screen::Provisioning;
     else if (!manualScreen || screen == screens::Screen::Provisioning) screen = screens::forFace(core.face());
@@ -494,7 +592,7 @@ void loop() {
     timesync::formatLocal(core.epochEndsAt(), endsAt, sizeof(endsAt));
 
     screens::View v{screen,  &core.state(),     core.remainingSeconds(), core.face(), r.sensorOk, eventsThisBoot,
-                    toast,   wifiLine,          wifi::connected(),       timeLine,    endsAt,
+                    toast,   wifiLine,          wifi::connected(),       devicesync::name(devicesync::status()), timeLine,    endsAt,
                     blegatt::name(),            provisioning::status()};
     screens::render(v);
 

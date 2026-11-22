@@ -142,6 +142,24 @@ void test_same_face_again_is_ignored() {
     TEST_ASSERT_EQUAL(before, events.size());
 }
 
+void test_configured_face_action_can_make_mode_face_display_only() {
+    auto t = make(shortDurations());
+    t.configureFaceAction(Face::Work, timer::FaceAction::None);
+    t.applyFace(Face::Display);
+    t.applyFace(Face::Work);
+    TEST_ASSERT_EQUAL(Status::Stopped, t.state().status);
+    lastEvent("FACE_CHANGED:WORK");
+}
+
+void test_configured_face_action_is_not_tied_to_face_name() {
+    auto t = make(shortDurations());
+    t.configureFaceAction(Face::Display, timer::FaceAction::StartLongBreak);
+    t.applyFace(Face::Work);
+    t.applyFace(Face::Display);
+    TEST_ASSERT_EQUAL(Status::Running, t.state().status);
+    TEST_ASSERT_EQUAL(Mode::LongBreak, t.state().mode);
+}
+
 // --- countdown ---------------------------------------------------------------
 
 void test_finishes_at_zero_without_auto_start() {
@@ -354,6 +372,8 @@ int main(int, char**) {
     RUN_TEST(test_pause_face_when_not_running_does_nothing);
     RUN_TEST(test_display_and_tech_change_nothing);
     RUN_TEST(test_same_face_again_is_ignored);
+    RUN_TEST(test_configured_face_action_can_make_mode_face_display_only);
+    RUN_TEST(test_configured_face_action_is_not_tied_to_face_name);
     RUN_TEST(test_finishes_at_zero_without_auto_start);
     RUN_TEST(test_full_cycle_work_finished_short_break);
     RUN_TEST(test_flip_to_same_mode_after_finish_starts_again);

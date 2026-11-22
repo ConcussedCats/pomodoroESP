@@ -29,6 +29,16 @@ void TimerCore::configure(const Durations& d) {
     if (state_.status == Status::Stopped) state_ = fresh(state_.mode, Status::Stopped);
 }
 
+void TimerCore::configureFaceAction(faces::Face face, FaceAction action) {
+    const uint8_t i = static_cast<uint8_t>(face);
+    if (i < 6) faceActions_[i] = action;
+}
+
+FaceAction TimerCore::faceAction(faces::Face face) const {
+    const uint8_t i = static_cast<uint8_t>(face);
+    return i < 6 ? faceActions_[i] : FaceAction::None;
+}
+
 uint32_t TimerCore::durationOf(Mode mode) const {
     switch (mode) {
         case Mode::Work: return durations_.workSeconds;
@@ -153,8 +163,13 @@ void TimerCore::applyFace(faces::Face f) {
     tick();  // a phase that ended a moment ago is FINISHED, not RUNNING
     emit(EventType::FaceChanged, f);
 
-    Mode mode;
-    if (modeForFace(f, mode)) {
+    const FaceAction action = faceAction(f);
+    Mode mode = Mode::Work;
+    const bool startsMode = action == FaceAction::StartWork || action == FaceAction::StartShortBreak ||
+                            action == FaceAction::StartLongBreak;
+    if (action == FaceAction::StartShortBreak) mode = Mode::ShortBreak;
+    else if (action == FaceAction::StartLongBreak) mode = Mode::LongBreak;
+    if (startsMode) {
         const bool sameMode = state_.mode == mode;
         if (sameMode && state_.status == Status::Paused) {
             resume();
@@ -163,8 +178,7 @@ void TimerCore::applyFace(faces::Face f) {
         }
         return;
     }
-    if (f == faces::Face::Pause && state_.status == Status::Running) pause();
-    // DISPLAY, TECH: screen only.
+    if (action == FaceAction::Pause && state_.status == Status::Running) pause();
 }
 
 CommandResult TimerCore::applyCommand(CommandType type, bool hasMode, Mode mode, const TargetState* target) {
@@ -251,6 +265,17 @@ const char* name(EventType t) {
         case EventType::StateSync: return "STATE_SYNC";
     }
     return "STATE_SYNC";
+}
+
+const char* name(FaceAction action) {
+    switch (action) {
+        case FaceAction::StartWork: return "START_WORK";
+        case FaceAction::StartShortBreak: return "START_SHORT_BREAK";
+        case FaceAction::StartLongBreak: return "START_LONG_BREAK";
+        case FaceAction::Pause: return "PAUSE";
+        case FaceAction::None: return "NONE";
+    }
+    return "NONE";
 }
 
 bool modeForFace(faces::Face f, Mode& out) {
