@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "faces/faces.h"
+#include "commands/command_protocol.h"
 #include "events/event_queue.h"
 #include "timer/snapshot.h"
 
@@ -38,6 +39,9 @@ bool loadEventMeta(uint8_t& head, uint8_t& count);
 void saveEventMeta(uint8_t head, uint8_t count);
 bool loadEventSlot(uint8_t slot, events::Event& event);
 void saveEventSlot(uint8_t slot, const events::Event& event);
+
+bool loadCommandCache(commands::CacheState& out);
+void saveCommandCache(const commands::CacheState& value);
 
 // Calibration of the physical cube: face per board orientation, screen rotation per orientation.
 bool loadFaceMap(faces::Face out[6]);

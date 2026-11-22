@@ -104,6 +104,7 @@ const char* errorCodeFor(const https::Response& r) {
 }
 
 void pair() {
+    log_i("provisioning: starting TLS with %u free heap bytes", ESP.getFreeHeap());
     char body[384];
     snprintf(body, sizeof(body),
              "{\"pairingToken\":\"%s\",\"hardwareId\":\"%s\",\"firmwareVersion\":\"%s\",\"protocolVersion\":1,"

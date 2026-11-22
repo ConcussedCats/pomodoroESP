@@ -38,6 +38,14 @@ struct EventRequest {
 };
 EventRequest eventRequest;
 
+struct AckRequest {
+    uint32_t generation = 0;
+    bool available = false;
+    char commandId[37] = "";
+    char json[COMMAND_ACK_SIZE] = "";
+};
+AckRequest ackRequest;
+
 void setStatus(ServerStatus value) {
     serverStatus = value;
 }
@@ -49,22 +57,29 @@ bool unauthorized(const https::Response& response) {
            strcmp(doc["errorCode"] | "", "DEVICE_UNAUTHORIZED") == 0;
 }
 
-void deliver(const Update& update) {
+void signalUnauthorized() {
     xSemaphoreTake(sharedMutex, portMAX_DELAY);
-    pending.unauthorized = pending.unauthorized || update.unauthorized;
-    if (update.hasServerTime) {
+    pending.unauthorized = true;
+    hasUpdate = true;
+    xSemaphoreGive(sharedMutex);
+}
+
+void deliverMetadata(bool hasServerTime, int64_t serverTime, uint32_t pendingCommands) {
+    xSemaphoreTake(sharedMutex, portMAX_DELAY);
+    if (hasServerTime) {
         pending.hasServerTime = true;
-        pending.serverTime = update.serverTime;
+        pending.serverTime = serverTime;
     }
-    if (update.pendingCommands) pending.pendingCommands = update.pendingCommands;
-    if (update.hasConfig) {
-        pending.hasConfig = true;
-        memcpy(pending.configJson, update.configJson, sizeof(pending.configJson));
-    }
-    if (update.hasEventResponse) {
-        pending.hasEventResponse = true;
-        memcpy(pending.eventResponse, update.eventResponse, sizeof(pending.eventResponse));
-    }
+    if (pendingCommands) pending.pendingCommands = pendingCommands;
+    hasUpdate = true;
+    xSemaphoreGive(sharedMutex);
+}
+
+void deliverText(bool& flag, char* destination, size_t size, const String& value) {
+    xSemaphoreTake(sharedMutex, portMAX_DELAY);
+    flag = true;
+    memcpy(destination, value.c_str(), value.length() + 1 < size ? value.length() + 1 : size);
+    destination[size - 1] = '\0';
     hasUpdate = true;
     xSemaphoreGive(sharedMutex);
 }
@@ -91,12 +106,23 @@ EventRequest currentEvents() {
     return copy;
 }
 
+AckRequest currentAck() {
+    xSemaphoreTake(sharedMutex, portMAX_DELAY);
+    const AckRequest copy = ackRequest;
+    xSemaphoreGive(sharedMutex);
+    return copy;
+}
+
 void worker(void*) {
     uint32_t nextHeartbeatMs = 0;
     uint32_t heartbeatSeconds = DEFAULT_HEARTBEAT_SECONDS;
     uint32_t commandPollSeconds = 3;
     uint32_t sentEventGeneration = 0;
     uint32_t nextEventRetryMs = 0;
+    uint32_t nextCommandPollMs = 0;
+    uint32_t sentAckGeneration = 0;
+    uint32_t nextAckRetryMs = 0;
+    bool heartbeatCompleted = false;
     bool wasReady = false;
     for (;;) {
         Snapshot state;
@@ -117,6 +143,10 @@ void worker(void*) {
             nextHeartbeatMs = 0;  // heartbeat immediately after reconnect
             sentEventGeneration = 0;
             nextEventRetryMs = 0;
+            nextCommandPollMs = 0;
+            sentAckGeneration = 0;
+            nextAckRetryMs = 0;
+            heartbeatCompleted = false;
             wasReady = true;
         }
         const uint32_t now = millis();
@@ -127,24 +157,19 @@ void worker(void*) {
             setStatus(ServerStatus::Contacting);
             const https::Response response =
                 https::request("POST", auth.apiBase, "/api/device/events", queued.json, auth.secret);
-            Update update;
             if (unauthorized(response)) {
-                update.unauthorized = true;
-                deliver(update);
+                signalUnauthorized();
                 setStatus(ServerStatus::Disabled);
                 wasReady = false;
                 continue;
             }
             if (response.status == 200 && response.body.length() < EVENT_RESPONSE_SIZE) {
-                update.hasEventResponse = true;
-                memcpy(update.eventResponse, response.body.c_str(), response.body.length() + 1);
+                deliverText(pending.hasEventResponse, pending.eventResponse, sizeof(pending.eventResponse), response.body);
                 JsonDocument responseDoc;
                 if (deserializeJson(responseDoc, response.body) == DeserializationError::Ok &&
                     responseDoc["state"]["serverTime"].is<int64_t>()) {
-                    update.hasServerTime = true;
-                    update.serverTime = responseDoc["state"]["serverTime"].as<int64_t>();
+                    deliverMetadata(true, responseDoc["state"]["serverTime"].as<int64_t>(), 0);
                 }
-                deliver(update);
                 sentEventGeneration = queued.generation;
                 nextEventRetryMs = 0;
                 setStatus(ServerStatus::Online);
@@ -153,6 +178,54 @@ void worker(void*) {
             log_w("sync: event upload failed, HTTP %d", response.status);
             nextEventRetryMs = now + RETRY_MS;
             if (response.status == 0) setStatus(ServerStatus::Offline);
+        }
+
+        AckRequest ack = currentAck();
+        if (heartbeatCompleted && ack.available && ack.generation != sentAckGeneration &&
+            (nextAckRetryMs == 0 || int32_t(now - nextAckRetryMs) >= 0)) {
+            char path[96];
+            snprintf(path, sizeof(path), "/api/device/commands/%s/ack", ack.commandId);
+            setStatus(ServerStatus::Contacting);
+            const https::Response response = https::request("POST", auth.apiBase, path, ack.json, auth.secret);
+            if (unauthorized(response)) {
+                signalUnauthorized();
+                setStatus(ServerStatus::Disabled);
+                wasReady = false;
+                continue;
+            }
+            if (response.status == 200 || response.status == 410) {
+                sentAckGeneration = ack.generation;
+                nextAckRetryMs = 0;
+                nextCommandPollMs = 0;
+                setStatus(ServerStatus::Online);
+                continue;
+            }
+            log_w("sync: command ack failed, HTTP %d", response.status);
+            nextAckRetryMs = now + RETRY_MS;
+            if (response.status == 0) setStatus(ServerStatus::Offline);
+        }
+
+        if (heartbeatCompleted && int32_t(now - nextCommandPollMs) >= 0) {
+            Credentials commandAuth = currentCredentials();
+            if (commandAuth.valid) {
+                const https::Response commands =
+                    https::request("GET", commandAuth.apiBase, "/api/device/commands", nullptr, commandAuth.secret);
+                memset(commandAuth.secret, 0, sizeof(commandAuth.secret));
+                if (unauthorized(commands)) {
+                    signalUnauthorized();
+                    setStatus(ServerStatus::Disabled);
+                    wasReady = false;
+                    continue;
+                }
+                if (commands.status == 200 && commands.body.length() < COMMAND_RESPONSE_SIZE) {
+                    deliverText(pending.hasCommands, pending.commandsJson, sizeof(pending.commandsJson), commands.body);
+                    setStatus(ServerStatus::Online);
+                } else {
+                    log_w("sync: command poll failed, HTTP %d", commands.status);
+                    if (commands.status == 0) setStatus(ServerStatus::Offline);
+                }
+            }
+            nextCommandPollMs = millis() + commandPollSeconds * 1000;
         }
 
         if (nextHeartbeatMs != 0 && int32_t(now - nextHeartbeatMs) < 0) {
@@ -176,13 +249,15 @@ void worker(void*) {
         }
 
         setStatus(ServerStatus::Contacting);
+#ifdef TELOS_DEBUG
+        log_i("sync: heartbeat with %u free heap bytes, %u stack words free", esp_get_free_heap_size(),
+              uxTaskGetStackHighWaterMark(nullptr));
+#endif
         const https::Response response =
             https::request("POST", auth.apiBase, "/api/devices/heartbeat", body, auth.secret);
         memset(auth.secret, 0, sizeof(auth.secret));
-        Update update;
         if (unauthorized(response)) {
-            update.unauthorized = true;
-            deliver(update);
+            signalUnauthorized();
             setStatus(ServerStatus::Disabled);
             wasReady = false;
             vTaskDelay(pdMS_TO_TICKS(IDLE_MS));
@@ -203,11 +278,13 @@ void worker(void*) {
             continue;
         }
         setStatus(ServerStatus::Online);
+        bool hasServerTime = false;
+        int64_t serverTime = timer::NONE;
         if (result["serverTime"].is<int64_t>()) {
-            update.hasServerTime = true;
-            update.serverTime = result["serverTime"].as<int64_t>();
+            hasServerTime = true;
+            serverTime = result["serverTime"].as<int64_t>();
         }
-        update.pendingCommands = result["pendingCommands"] | 0;
+        const uint32_t pendingCommands = result["pendingCommands"] | 0;
         const uint32_t interval = result["heartbeatIntervalSeconds"] | heartbeatSeconds;
         if (interval > 0 && interval <= 3600) heartbeatSeconds = interval;
         const uint32_t commandInterval = result["commandPollIntervalSeconds"] | commandPollSeconds;
@@ -221,18 +298,17 @@ void worker(void*) {
                     https::request("GET", configAuth.apiBase, "/api/device/config", nullptr, configAuth.secret);
                 memset(configAuth.secret, 0, sizeof(configAuth.secret));
                 if (unauthorized(config)) {
-                    update.unauthorized = true;
+                    signalUnauthorized();
                     setStatus(ServerStatus::Disabled);
                 } else if (config.status == 200 && config.body.length() < CONFIG_JSON_SIZE) {
-                    update.hasConfig = true;
-                    memcpy(update.configJson, config.body.c_str(), config.body.length() + 1);
+                    deliverText(pending.hasConfig, pending.configJson, sizeof(pending.configJson), config.body);
                     JsonDocument configDoc;
                     if (deserializeJson(configDoc, config.body) == DeserializationError::Ok) {
-                        JsonVariantConst serverTime = configDoc["state"]["serverTime"];
-                        if (!serverTime.is<int64_t>()) serverTime = configDoc["serverTime"];
-                        if (serverTime.is<int64_t>()) {
-                            update.hasServerTime = true;
-                            update.serverTime = serverTime.as<int64_t>();
+                        JsonVariantConst configServerTime = configDoc["state"]["serverTime"];
+                        if (!configServerTime.is<int64_t>()) configServerTime = configDoc["serverTime"];
+                        if (configServerTime.is<int64_t>()) {
+                            hasServerTime = true;
+                            serverTime = configServerTime.as<int64_t>();
                         }
                     }
                 } else {
@@ -240,7 +316,9 @@ void worker(void*) {
                 }
             }
         }
-        deliver(update);
+        deliverMetadata(hasServerTime, serverTime, pendingCommands);
+        heartbeatCompleted = true;
+        if (pendingCommands > 0) nextCommandPollMs = 0;
         nextHeartbeatMs = millis() + heartbeatSeconds * 1000;
         vTaskDelay(pdMS_TO_TICKS(IDLE_MS));
     }
@@ -249,9 +327,10 @@ void worker(void*) {
 }  // namespace
 
 void begin() {
+    if (sharedMutex) return;
     sharedMutex = xSemaphoreCreateMutex();
     reloadCredentials();
-    xTaskCreatePinnedToCore(worker, "telos-sync", 32768, nullptr, 1, nullptr, 0);
+    xTaskCreatePinnedToCore(worker, "telos-sync", 12288, nullptr, 1, nullptr, 0);
 }
 
 void reloadCredentials() {
@@ -267,6 +346,7 @@ void reloadCredentials() {
 }
 
 void publishEvents(const char* json) {
+    if (!sharedMutex) return;
     xSemaphoreTake(sharedMutex, portMAX_DELAY);
     const bool available = json && json[0];
     if (available != eventRequest.available ||
@@ -281,6 +361,7 @@ void publishEvents(const char* json) {
 }
 
 void retryEvents() {
+    if (!sharedMutex) return;
     xSemaphoreTake(sharedMutex, portMAX_DELAY);
     if (eventRequest.available) {
         eventRequest.generation++;
@@ -289,7 +370,19 @@ void retryEvents() {
     xSemaphoreGive(sharedMutex);
 }
 
+void submitCommandAck(const char* commandId, const char* json) {
+    if (!sharedMutex || !commandId || !commandId[0] || !json || !json[0]) return;
+    xSemaphoreTake(sharedMutex, portMAX_DELAY);
+    snprintf(ackRequest.commandId, sizeof(ackRequest.commandId), "%s", commandId);
+    snprintf(ackRequest.json, sizeof(ackRequest.json), "%s", json);
+    ackRequest.available = true;
+    ackRequest.generation++;
+    if (ackRequest.generation == 0) ackRequest.generation = 1;
+    xSemaphoreGive(sharedMutex);
+}
+
 void publish(const Snapshot& value) {
+    if (!sharedMutex) return;
     xSemaphoreTake(sharedMutex, portMAX_DELAY);
     latest = value;
     hasSnapshot = true;
@@ -297,6 +390,7 @@ void publish(const Snapshot& value) {
 }
 
 bool takeUpdate(Update& out) {
+    if (!sharedMutex) return false;
     xSemaphoreTake(sharedMutex, portMAX_DELAY);
     const bool available = hasUpdate;
     if (available) {

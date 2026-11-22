@@ -23,6 +23,7 @@ constexpr const char* KEY_API = "api_base";
 constexpr const char* KEY_CONFIG = "config";
 constexpr const char* KEY_CONFIG_HASH = "config_hash";
 constexpr const char* KEY_EVENT_META = "events_meta";
+constexpr const char* KEY_COMMAND_CACHE = "cmd_cache";
 
 struct EventMeta {
     uint8_t version;
@@ -172,6 +173,16 @@ void saveEventSlot(uint8_t slot, const events::Event& event) {
     char key[12];
     snprintf(key, sizeof(key), "event_%02u", slot);
     eventPrefs.putBytes(key, &event, sizeof(event));
+}
+
+bool loadCommandCache(commands::CacheState& out) {
+    if (!eventsReady || !eventPrefs.isKey(KEY_COMMAND_CACHE) ||
+        eventPrefs.getBytesLength(KEY_COMMAND_CACHE) != sizeof(out)) return false;
+    return eventPrefs.getBytes(KEY_COMMAND_CACHE, &out, sizeof(out)) == sizeof(out);
+}
+
+void saveCommandCache(const commands::CacheState& value) {
+    if (eventsReady) eventPrefs.putBytes(KEY_COMMAND_CACHE, &value, sizeof(value));
 }
 
 bool loadFaceMap(faces::Face out[6]) {
