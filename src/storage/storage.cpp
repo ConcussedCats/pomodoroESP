@@ -14,6 +14,9 @@ constexpr const char* KEY_SSID = "wifi_ssid";
 constexpr const char* KEY_PASS = "wifi_pass";
 constexpr const char* KEY_FACES = "face_map";
 constexpr const char* KEY_ROT = "rotation";
+constexpr const char* KEY_SECRET = "secret";
+constexpr const char* KEY_DEVICE_ID = "device_id";
+constexpr const char* KEY_API = "api_base";
 
 Preferences prefs;
 bool ready = false;
@@ -77,6 +80,31 @@ void clearWifi() {
     if (!ready) return;
     prefs.remove(KEY_SSID);
     prefs.remove(KEY_PASS);
+}
+
+bool hasSecret() {
+    return ready && prefs.isKey(KEY_SECRET) && prefs.getString(KEY_SECRET, "").length() > 0;
+}
+
+bool loadDevice(char secret[64], int64_t& deviceId, char apiBase[128]) {
+    if (!hasSecret()) return false;
+    loadString(KEY_SECRET, secret, 64);
+    loadString(KEY_API, apiBase, 128);
+    deviceId = prefs.getLong64(KEY_DEVICE_ID, 0);
+    return secret[0] != '\0' && apiBase[0] != '\0';
+}
+
+void saveDevice(const char* secret, int64_t deviceId, const char* apiBase) {
+    if (!ready) return;
+    prefs.putString(KEY_SECRET, secret);
+    prefs.putLong64(KEY_DEVICE_ID, deviceId);
+    prefs.putString(KEY_API, apiBase);
+}
+
+void clearDevice() {
+    if (!ready) return;
+    prefs.remove(KEY_SECRET);
+    prefs.remove(KEY_DEVICE_ID);
 }
 
 bool loadFaceMap(faces::Face out[6]) {

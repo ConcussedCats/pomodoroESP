@@ -117,16 +117,38 @@ void loop(uint32_t now) {
     }
 }
 
-void setCredentials(const char* ssid, const char* password) {
+void tryCredentials(const char* ssid, const char* password) {
     strncpy(storedSsid, ssid, sizeof(storedSsid) - 1);
     storedSsid[sizeof(storedSsid) - 1] = '\0';
     strncpy(storedPass, password, sizeof(storedPass) - 1);
     storedPass[sizeof(storedPass) - 1] = '\0';
-    storage::saveWifi(storedSsid, storedPass);
     WiFi.disconnect(false, false);
     backoffMs = BACKOFF_FIRST_MS;
     failure = Failure::None;
+    outageUntilMs = millis();
     startAttempt(millis());
+}
+
+void persistCurrent() {
+    if (storedSsid[0] != '\0') storage::saveWifi(storedSsid, storedPass);
+}
+
+void restoreSaved() {
+    WiFi.disconnect(false, false);
+    failure = Failure::None;
+    backoffMs = BACKOFF_FIRST_MS;
+    if (storage::loadWifi(storedSsid, storedPass)) {
+        startAttempt(millis());
+    } else {
+        memset(storedPass, 0, sizeof(storedPass));
+        storedSsid[0] = '\0';
+        current = State::Off;
+    }
+}
+
+void setCredentials(const char* ssid, const char* password) {
+    tryCredentials(ssid, password);
+    persistCurrent();
 }
 
 void forget() {

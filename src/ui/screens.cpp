@@ -26,6 +26,7 @@ struct Drawn {
 };
 
 Drawn drawn;
+char drawnProvisioning[64] = "";
 
 TFT_eSPI& t() {
     return display::tft();
@@ -177,6 +178,28 @@ void techDynamic(const View& v) {
     text(v.sensorOk ? "MPU6050 ok" : "MPU6050 missing", x, y(7), 2, v.sensorOk ? TFT_GREEN : TFT_RED, MR_DATUM, 120);
 }
 
+// --- Provisioning (no device secret yet, or blue button held 3 s) ------------
+
+void provisioningStatic(const View& v) {
+    t().fillScreen(TFT_BLACK);
+    t().fillRect(0, 0, 240, 34, TFT_BLUE);
+    t().setTextColor(TFT_WHITE, TFT_BLUE);
+    t().setTextDatum(MC_DATUM);
+    t().drawString("ADD THIS CUBE", 120, 18, 4);
+    text(v.bleName ? v.bleName : "", 120, 62, 4, TFT_WHITE);
+    text("On teclos.space open", 120, 100, 2, TFT_LIGHTGREY);
+    text("Devices > Add device", 120, 120, 2, TFT_WHITE);
+    text("and choose this cube", 120, 140, 2, TFT_LIGHTGREY);
+    if (!v.toast) bottomLine("blue 3 s: cancel (paired cube)", TFT_DARKGREY);
+}
+
+void provisioningDynamic(const View& v) {
+    const char* st = v.provisioningStatus && v.provisioningStatus[0] ? v.provisioningStatus : "IDLE";
+    const bool failed = strstr(st, "FAILED") != nullptr || strstr(st, "INVALID") != nullptr;
+    const bool done = strcmp(st, "PAIRED") == 0;
+    text(st, 120, 180, 2, failed ? TFT_RED : (done ? TFT_GREEN : TFT_YELLOW), MC_DATUM, 236);
+}
+
 }  // namespace
 
 void begin() {
@@ -239,16 +262,21 @@ void render(const View& v) {
             case Screen::Main: mainStatic(v); break;
             case Screen::Info: infoStatic(v); break;
             case Screen::Tech: techStatic(v); break;
+            case Screen::Provisioning: provisioningStatic(v); break;
         }
         if (toast) bottomLine(v.toast, TFT_YELLOW);
     }
-    const bool tickChanged = full || drawn.remaining != v.remainingSeconds ||
+    const bool provisioningChanged = v.screen == Screen::Provisioning && v.provisioningStatus &&
+                                     strcmp(drawnProvisioning, v.provisioningStatus) != 0;
+    if (provisioningChanged) snprintf(drawnProvisioning, sizeof(drawnProvisioning), "%s", v.provisioningStatus);
+    const bool tickChanged = full || provisioningChanged || drawn.remaining != v.remainingSeconds ||
                              (v.screen == Screen::Tech && drawn.uptimeS != up);
     if (tickChanged) {
         switch (v.screen) {
             case Screen::Main: mainDynamic(v); break;
             case Screen::Info: infoDynamic(v); break;
             case Screen::Tech: techDynamic(v); break;
+            case Screen::Provisioning: provisioningDynamic(v); break;
         }
     }
     drawn.valid = true;

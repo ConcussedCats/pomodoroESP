@@ -22,6 +22,12 @@ bool loadWifi(char ssid[33], char password[65]);
 void saveWifi(const char* ssid, const char* password);
 void clearWifi();
 
+// Pairing result (PROTOCOL.md 2, 3.1). The secret is 43 chars base64url; never log it.
+bool hasSecret();
+bool loadDevice(char secret[64], int64_t& deviceId, char apiBase[128]);
+void saveDevice(const char* secret, int64_t deviceId, const char* apiBase);
+void clearDevice();  // 401 DEVICE_UNAUTHORIZED / unbind: back to provisioning
+
 // Calibration of the physical cube: face per board orientation, screen rotation per orientation.
 bool loadFaceMap(faces::Face out[6]);
 void saveFaceMap(const faces::Face table[6]);
