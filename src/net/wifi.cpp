@@ -13,6 +13,7 @@ namespace {
 constexpr uint32_t ATTEMPT_TIMEOUT_MS = 15000;
 constexpr uint32_t BACKOFF_FIRST_MS = 1000;
 constexpr uint32_t BACKOFF_MAX_MS = 60000;
+constexpr uint32_t STALE_EVENT_MS = 500;  // a real failure never comes this fast
 
 char storedSsid[33] = "";
 char storedPass[65] = "";
@@ -95,6 +96,8 @@ void loop(uint32_t now) {
                 backoffMs = BACKOFF_FIRST_MS;
                 log_i("Wi-Fi: connected to '%s', %d dBm, IP %s", storedSsid, WiFi.RSSI(),
                       WiFi.localIP().toString().c_str());
+            } else if (disconnected && now - attemptStartMs < STALE_EVENT_MS) {
+                disconnected = false;  // late event of the attempt that was just replaced
             } else if (disconnected) {
                 scheduleRetry(now, failureFor(disconnectReason));
             } else if (now - attemptStartMs >= ATTEMPT_TIMEOUT_MS) {
