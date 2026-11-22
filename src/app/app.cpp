@@ -174,6 +174,9 @@ void loop() {
     if (r.changes != lastFaceChanges) {
         lastFaceChanges = r.changes;
         manualScreen = false;
+        screens::followOrientation(r.stable);
+        Serial.printf("[face] axis %s -> %s, screen rotation %u\n", faces::name(r.stable), faces::name(r.face),
+                      screens::rotation() * 90);
         core.applyFace(r.face);
     }
     core.tick();

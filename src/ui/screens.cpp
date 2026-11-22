@@ -184,6 +184,26 @@ void invalidate() {
     drawn.valid = false;
 }
 
+namespace {
+// Rotation per board orientation (+X, -X, +Y, -Y, +Z, -Z); -1 = keep the current one.
+// Opposite tilts differ by 180 deg, neighbouring tilts by 90 deg.
+constexpr int8_t ROTATION_FOR[6] = {2, 0, 1, 3, -1, -1};
+uint8_t currentRotation = 0;
+}  // namespace
+
+void followOrientation(faces::Orientation o) {
+    if (o == faces::Orientation::None) return;
+    const int8_t r = ROTATION_FOR[static_cast<int>(o)];
+    if (r < 0 || uint8_t(r) == currentRotation) return;
+    currentRotation = uint8_t(r);
+    t().setRotation(currentRotation);
+    invalidate();
+}
+
+uint8_t rotation() {
+    return currentRotation;
+}
+
 Screen forFace(faces::Face face) {
     if (face == faces::Face::Display) return Screen::Info;
     if (face == faces::Face::Tech) return Screen::Tech;
