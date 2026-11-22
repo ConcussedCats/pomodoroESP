@@ -71,10 +71,15 @@ void readSecret(const char* prompt, Handler onLine) {
 }
 
 void poll() {
+    static char previous = 0;
     while (Serial.available()) {
         const char c = char(Serial.read());
+        const bool secondHalfOfCrLf = c == '\n' && previous == '\r';
+        previous = c;
         if (c == '\r' || c == '\n') {
-            if (length == 0 && !secretHandler) continue;  // \r\n pairs
+            // Enter arrives as "\r\n": the '\n' must not answer the password prompt with "".
+            if (secondHalfOfCrLf) continue;
+            if (length == 0 && !secretHandler) continue;
             Serial.println();
             run();
             length = 0;

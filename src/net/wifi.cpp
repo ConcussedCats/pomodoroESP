@@ -69,6 +69,8 @@ void begin() {
     WiFi.setHostname(host);
     WiFi.onEvent(
         [](WiFiEvent_t, WiFiEventInfo_t info) {
+            // ASSOC_LEAVE is our own WiFi.disconnect() before a new attempt, not a failure.
+            if (info.wifi_sta_disconnected.reason == WIFI_REASON_ASSOC_LEAVE) return;
             disconnectReason = info.wifi_sta_disconnected.reason;
             disconnected = true;
         },
