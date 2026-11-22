@@ -63,6 +63,41 @@ int64_t TimerCore::serverEndsAt() const {
     return state_.localEndsAt + clockOffset_;
 }
 
+void TimerCore::restoreAndSync(const State& s) {
+    state_ = s;
+    state_.localEndsAt = NONE;
+    emit(EventType::StateSync);
+}
+
+int64_t TimerCore::epochEndsAt() const {
+    if (state_.status != Status::Running || state_.localEndsAt == NONE) return NONE;
+    const int64_t epoch = env_.epochMs();
+    if (epoch == NONE) return NONE;
+    return epoch + (state_.localEndsAt - env_.monotonicMs());
+}
+
+bool TimerCore::continueUntilEpoch(int64_t endsAtEpoch) {
+    const int64_t epoch = env_.epochMs();
+    if (state_.status != Status::Paused || endsAtEpoch == NONE || epoch == NONE) return false;
+    const int64_t left = endsAtEpoch - epoch;
+    if (left <= 0) {
+        state_.remainingSeconds = 0;
+        state_.status = Status::Finished;
+        state_.startedAt = NONE;
+        state_.pausedAt = NONE;
+        state_.localEndsAt = NONE;
+        emit(EventType::Finished);
+        return true;
+    }
+    state_.status = Status::Running;
+    state_.remainingSeconds = uint32_t((left + 999) / 1000);
+    state_.startedAt = epoch;
+    state_.pausedAt = NONE;
+    state_.localEndsAt = env_.monotonicMs() + left;
+    emit(EventType::Resumed);
+    return true;
+}
+
 void TimerCore::start(Mode mode) {
     state_ = fresh(mode, Status::Running);
     const int64_t now = env_.monotonicMs();

@@ -37,6 +37,8 @@ Reading read();
 
 // Orientation -> face table. Default until calibration (TECH screen, stored in NVS later).
 void setMapping(const Face table[6]);
+void getMapping(Face out[6]);
+void defaultMapping(Face out[6]);  // breadboard rig table
 
 // Protocol names ("WORK", "DISPLAY", ...). Inline so host tests need no Arduino code.
 inline const char* name(Face face) {
