@@ -4,6 +4,7 @@
 
 #include "buttons/buttons.h"
 #include "clock/timesync.h"
+#include "commands/command_protocol.h"
 #include "core/device.h"
 #include "net/wifi.h"
 #include "provisioning/ble_gatt.h"
@@ -62,6 +63,11 @@ events::Queue eventQueue({
 });
 events::Batch publishedBatch;
 uint32_t publishedQueueRevision = 0;
+commands::Cache commandCache({
+    [](commands::CacheState& state) { return storage::loadCommandCache(state); },
+    [](const commands::CacheState& state) { storage::saveCommandCache(state); },
+});
+bool remoteCommandActive = false;
 bool saveDue = false;
 uint32_t lastSaveMs = 0;
 
@@ -76,6 +82,7 @@ uint32_t lastNoWifiFlashMs = 0;
 uint32_t lastFaceChanges = 0;
 char appliedConfigHash[65] = "";
 bool mayAdoptServerState = true;
+bool syncStarted = false;
 
 // Screen: follows the face (DISPLAY / TECH); the blue button switches manually until the next flip.
 bool manualScreen = false;
@@ -113,6 +120,10 @@ void onTimerEvent(EventType type, faces::Face face) {
     eventsThisBoot++;
     saveDue = true;  // written from the loop, not from inside the timer
     const timer::State& s = core.state();
+    if (remoteCommandActive) {
+        Serial.printf("[command event] %s %s\n", timer::name(type), timer::name(s.status));
+        return;  // the command ack reports this transition; do not also enqueue a device event
+    }
     events::Event event;
     snprintf(event.bootId, sizeof(event.bootId), "%s", bootId);
     device::newUuid(event.eventId);
@@ -306,6 +317,60 @@ bool parseAndApplyConfig(const char* json, bool allowState, bool persist) {
     return true;
 }
 
+void submitCommandAck(const commands::Ack& ack) {
+    static char body[devicesync::COMMAND_ACK_SIZE];
+    if (!commands::buildAck(ack, body, sizeof(body))) {
+        Serial.printf("commands: ack for %s did not fit\n", ack.commandId);
+        return;
+    }
+    devicesync::submitCommandAck(ack.commandId, body);
+}
+
+void processCommands(const char* json) {
+    commands::Command command;
+    const commands::ParseResult parsed = commands::parseLatest(json, command);
+    if (parsed == commands::ParseResult::Empty) return;
+    if (parsed == commands::ParseResult::Invalid) {
+        Serial.println("commands: invalid response payload");
+        return;
+    }
+    if (const commands::Ack* previous = commandCache.find(command.commandId)) {
+        Serial.printf("commands: repeating cached ack for %s\n", command.commandId);
+        submitCommandAck(*previous);
+        return;
+    }
+
+    commands::Ack ack;
+    snprintf(ack.commandId, sizeof(ack.commandId), "%s", command.commandId);
+    const int64_t serverNow = core.hasClockOffset() ? device::monotonicMs() + core.clockOffset() : timer::NONE;
+    timer::CommandResult result{false, "CLOCK_NOT_SYNCED"};
+    if (serverNow != timer::NONE && serverNow >= command.expiresAt) {
+        result = {false, "COMMAND_EXPIRED"};
+    } else if (command.type == timer::CommandType::SetState || command.type == timer::CommandType::Release) {
+        result = {false, "UNSUPPORTED_COMMAND"};  // implemented by stage 8
+    } else if (serverNow != timer::NONE) {
+        remoteCommandActive = true;
+        result = core.applyCommand(command.type, command.hasMode, command.mode, nullptr);
+        remoteCommandActive = false;
+    }
+
+    ack.executed = result.executed;
+    if (result.errorCode) snprintf(ack.errorCode, sizeof(ack.errorCode), "%s", result.errorCode);
+    ack.state = core.state();
+    ack.state.remainingSeconds = core.remainingSeconds();
+    ack.state.localEndsAt = timer::NONE;
+    ack.endsAt = core.serverEndsAt();
+    if (ack.executed) {
+        storage::saveTimer(timer::capture(core));
+        saveDue = false;
+        vibration::ack();
+    }
+    commandCache.remember(ack);  // persist before network I/O: a redelivery cannot execute twice
+    submitCommandAck(ack);
+    Serial.printf("commands: %s %s%s%s\n", command.commandId, ack.executed ? "EXECUTED" : "REJECTED",
+                  ack.errorCode[0] ? " " : "", ack.errorCode);
+}
+
 void processSync() {
     static devicesync::Update update;
     if (!devicesync::takeUpdate(update)) return;
@@ -313,6 +378,7 @@ void processSync() {
         Serial.println("sync: device unauthorized, clearing secret and returning to provisioning");
         storage::clearDevice();
         eventQueue.clear();
+        commandCache.clear();
         devicesync::reloadCredentials();
         appliedConfigHash[0] = '\0';
         provisioning::start();
@@ -320,10 +386,7 @@ void processSync() {
         return;
     }
     if (update.hasServerTime) core.setClockOffset(update.serverTime - device::monotonicMs());
-    if (update.pendingCommands > 0) {
-        Serial.printf("sync: %lu pending command(s); polling comes in stage 7\n",
-                      (unsigned long)update.pendingCommands);
-    }
+    if (update.pendingCommands > 0) Serial.printf("sync: %lu pending command(s)\n", (unsigned long)update.pendingCommands);
     if (update.hasEventResponse) {
         const uint8_t handled = events::terminalPrefix(update.eventResponse, publishedBatch);
         if (handled) {
@@ -335,6 +398,7 @@ void processSync() {
         }
     }
     if (update.hasConfig) parseAndApplyConfig(update.configJson, mayAdoptServerState, true);
+    if (update.hasCommands) processCommands(update.commandsJson);
 }
 
 void publishEventQueue() {
@@ -561,6 +625,7 @@ void setup() {
     bootCounter = storage::bumpBootCounter();
     device::newUuid(bootId);
     eventQueue.begin();
+    commandCache.begin();
     Serial.printf("boot #%lu\n", (unsigned long)bootCounter);
 
     rgb::begin();
@@ -591,8 +656,9 @@ void setup() {
     provisioning::begin([](int64_t serverTime) { core.setClockOffset(serverTime - device::monotonicMs()); });
     timesync::begin();
     wifi::begin();
-    devicesync::begin();
     if (storage::hasSecret()) {
+        devicesync::begin();
+        syncStarted = true;
         Serial.println("paired: yes");
     } else {
         // No device secret: the cube waits for the website (FIRMWARE-SPEC 2.1, PROVISIONING).
@@ -629,7 +695,12 @@ void loop() {
     const bool wasProvisioning = provisioning::active();
     provisioning::loop(now);
     if (wasProvisioning && !provisioning::active()) {
-        devicesync::reloadCredentials();
+        if (!syncStarted && storage::hasSecret()) {
+            devicesync::begin();
+            syncStarted = true;
+        } else {
+            devicesync::reloadCredentials();
+        }
         screens::invalidate();
     }
     continuePendingPhase();
