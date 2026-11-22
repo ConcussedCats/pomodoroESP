@@ -29,9 +29,16 @@ void setText(NimBLECharacteristic* c, const char* s) {
 }
 
 class ServerCallbacks : public NimBLEServerCallbacks {
-    void onConnect(NimBLEServer*) override {
+    void onConnect(NimBLEServer*, ble_gap_conn_desc* desc) override {
         connected = true;
         newConnection = true;
+        // Ask the central to encrypt right away. Chrome on Windows does not start pairing by
+        // itself when a write to an encrypted characteristic is refused ("Authentication failed").
+        NimBLEDevice::startSecurity(desc->conn_handle);
+    }
+    void onAuthenticationComplete(ble_gap_conn_desc* desc) override {
+        log_i("BLE: link %s, bonded %d", desc->sec_state.encrypted ? "encrypted" : "NOT encrypted",
+              desc->sec_state.bonded);
     }
     void onDisconnect(NimBLEServer*) override {
         connected = false;
@@ -74,9 +81,9 @@ const char* name() {
 void start(const char* deviceInfoJson) {
     if (isRunning) return;
     NimBLEDevice::init(name());
-    // LE Secure Connections, "Just Works" (the cube has no keypad), no bonding: the OS shows
-    // its pairing prompt on the first encrypted write and nothing stale is kept.
-    NimBLEDevice::setSecurityAuth(false, false, true);
+    // LE Secure Connections, "Just Works" (the cube has no keypad), with bonding: Windows pairs
+    // more reliably with a bond. Bonds are wiped on factory reset (stage 9).
+    NimBLEDevice::setSecurityAuth(true, false, true);
     NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
     NimBLEDevice::setMTU(517);
 
