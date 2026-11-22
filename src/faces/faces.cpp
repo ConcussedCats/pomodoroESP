@@ -128,22 +128,4 @@ void setMapping(const Face table[6]) {
     portEXIT_CRITICAL(&lock);
 }
 
-const char* name(Face face) {
-    switch (face) {
-        case Face::Work: return "WORK";
-        case Face::ShortBreak: return "SHORT_BREAK";
-        case Face::LongBreak: return "LONG_BREAK";
-        case Face::Pause: return "PAUSE";
-        case Face::Display: return "DISPLAY";
-        case Face::Tech: return "TECH";
-        case Face::Unknown: return "UNKNOWN";
-    }
-    return "?";
-}
-
-const char* name(Orientation o) {
-    static const char* names[] = {"+X", "-X", "+Y", "-Y", "+Z", "-Z", "--"};
-    return names[static_cast<int>(o)];
-}
-
 }  // namespace faces

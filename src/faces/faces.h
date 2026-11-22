@@ -38,7 +38,23 @@ Reading read();
 // Orientation -> face table. Default until calibration (TECH screen, stored in NVS later).
 void setMapping(const Face table[6]);
 
-const char* name(Face face);
-const char* name(Orientation o);
+// Protocol names ("WORK", "DISPLAY", ...). Inline so host tests need no Arduino code.
+inline const char* name(Face face) {
+    switch (face) {
+        case Face::Work: return "WORK";
+        case Face::ShortBreak: return "SHORT_BREAK";
+        case Face::LongBreak: return "LONG_BREAK";
+        case Face::Pause: return "PAUSE";
+        case Face::Display: return "DISPLAY";
+        case Face::Tech: return "TECH";
+        case Face::Unknown: return "UNKNOWN";
+    }
+    return "?";
+}
+
+inline const char* name(Orientation o) {
+    static const char* const names[] = {"+X", "-X", "+Y", "-Y", "+Z", "-Z", "--"};
+    return names[static_cast<int>(o)];
+}
 
 }  // namespace faces

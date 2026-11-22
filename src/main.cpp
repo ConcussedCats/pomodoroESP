@@ -1,16 +1,11 @@
 #include <Arduino.h>
 
-#ifdef TELOS_HW_TEST
-#include "hwtest/hw_test.h"
+#include "app/app.h"
 
 void setup() {
-    hwtest::setup();
+    app::setup();
 }
 
 void loop() {
-    hwtest::loop();
+    app::loop();
 }
-
-#else
-#error "Only env:hwtest exists so far (stage 1). The cube firmware comes in stage 2."
-#endif
