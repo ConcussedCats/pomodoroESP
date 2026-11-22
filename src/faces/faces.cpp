@@ -12,14 +12,16 @@ constexpr uint32_t REINIT_EVERY_MS = 1000;  // retry a missing / failed sensor
 portMUX_TYPE lock = portMUX_INITIALIZER_UNLOCKED;
 Reading shared;
 
-// Default table until the cube is calibrated (which face is up for each board axis).
+// Default table until the cube is calibrated and the table is stored in NVS.
+// Recorded on the breadboard rig (2026-11-22): lying flat = PAUSE, the four tilts are
+// WORK / SHORT_BREAK / LONG_BREAK / DISPLAY, upside down = TECH.
 Face mapping[6] = {
-    Face::ShortBreak,  // +X
-    Face::LongBreak,   // -X
-    Face::Display,      // +Y
-    Face::Tech,         // -Y
-    Face::Work,         // +Z
-    Face::Pause,        // -Z
+    Face::Display,     // +X
+    Face::Work,        // -X
+    Face::LongBreak,   // +Y
+    Face::ShortBreak,  // -Y
+    Face::Pause,       // +Z  flat on the desk
+    Face::Tech,        // -Z  upside down
 };
 
 Orientation classify(const mpu6050::Accel& a) {
