@@ -2,7 +2,13 @@
 
 #include <Arduino.h>
 #include <NimBLEDevice.h>
+#include <esp_mac.h>
 #include <string.h>
+
+extern "C" {
+#include "nimble/nimble/host/include/host/ble_hs_id.h"
+#include "nimble/nimble/host/include/host/ble_hs_pvcy.h"
+}
 
 #include <string>
 
@@ -69,6 +75,22 @@ class ControlCallbacks : public NimBLECharacteristicCallbacks {
     }
 };
 
+// A static random BLE address derived from the eFuse MAC: stable for this board, but not the
+// public Bluetooth MAC, so a Windows PC that cached a broken pairing state for the public
+// address sees a fresh device. Not a changing (private) address: privacy stays off.
+void useStaticRandomAddress() {
+    uint8_t mac[6];
+    esp_efuse_mac_get_default(mac);
+    uint8_t rnd[6];  // little-endian, as NimBLE expects
+    for (int i = 0; i < 6; i++) rnd[i] = mac[5 - i] ^ 0x5A;
+    rnd[5] |= 0xC0;  // two top bits 11 = static random address
+    NimBLEDevice::setOwnAddrType(BLE_OWN_ADDR_RANDOM);
+    ble_hs_pvcy_rpa_config(NIMBLE_HOST_DISABLE_PRIVACY);
+    const int rc = ble_hs_id_set_rnd(rnd);
+    log_i("BLE: static random address %02X:%02X:%02X:%02X:%02X:%02X (rc %d)", rnd[5], rnd[4], rnd[3], rnd[2],
+          rnd[1], rnd[0], rc);
+}
+
 ServerCallbacks serverCallbacks;
 ProvisioningCallbacks provisioningCallbacks;
 ControlCallbacks controlCallbacks;
@@ -83,6 +105,7 @@ const char* name() {
 void start(const char* deviceInfoJson) {
     if (isRunning) return;
     NimBLEDevice::init(name());
+    useStaticRandomAddress();
     // LE Secure Connections, "Just Works" (the cube has no keypad), with bonding: Windows always
     // creates a bond and refuses to pair with a device that says "no bonding" ("Authentication
     // failed" in Chrome). Bonds are wiped on factory reset (stage 9).
