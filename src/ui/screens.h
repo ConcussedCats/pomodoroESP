@@ -18,6 +18,10 @@ struct View {
     bool sensorOk;
     uint32_t eventsThisBoot;
     const char* toast;  // short message on the bottom line, nullptr = none
+    const char* wifiLine;  // "home-net -61 dBm", "connecting", "WIFI_AUTH_FAILED", "not set"
+    bool wifiOk;
+    const char* timeLine;  // "14:05" or "not synced"
+    const char* endsAt;    // local end of the running phase "14:30", "" if unknown
 };
 
 void begin();

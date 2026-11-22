@@ -20,6 +20,9 @@ Color color = OFF;
 Effect effect = Effect::Solid;
 uint32_t effectStartMs = 0;
 uint8_t brightnessPercent = 60;
+Color flashColor = OFF;
+uint32_t flashUntilMs = 0;
+bool flashing = false;
 
 void write(Color c, float level) {
     // Perceived brightness is roughly quadratic in PWM duty.
@@ -59,12 +62,28 @@ void show(Color c, Effect e) {
     portEXIT_CRITICAL(&lock);
 }
 
+void flash(Color c, uint16_t ms) {
+    portENTER_CRITICAL(&lock);
+    flashColor = c;
+    flashUntilMs = millis() + ms;
+    flashing = true;
+    portEXIT_CRITICAL(&lock);
+}
+
 void update(uint32_t nowMs) {
     portENTER_CRITICAL(&lock);
     const Color c = color;
     const Effect e = effect;
     const uint32_t elapsed = nowMs - effectStartMs;
+    if (flashing && int32_t(nowMs - flashUntilMs) >= 0) flashing = false;
+    const bool overlay = flashing;
+    const Color fc = flashColor;
     portEXIT_CRITICAL(&lock);
+
+    if (overlay) {
+        write(fc, 1.0f);
+        return;
+    }
 
     float level = 1.0f;
     switch (e) {

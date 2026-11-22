@@ -27,6 +27,8 @@ void begin();
 void setBrightness(uint8_t percent);  // 0..100
 uint8_t brightness();
 void show(Color color, Effect effect = Effect::Solid);
+// Short flash on top of the current colour (e.g. yellow "no Wi-Fi" every 5 s).
+void flash(Color color, uint16_t ms);
 void update(uint32_t nowMs);
 
 }  // namespace rgb

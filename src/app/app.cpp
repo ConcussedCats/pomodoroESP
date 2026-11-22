@@ -3,7 +3,9 @@
 #include <Arduino.h>
 
 #include "buttons/buttons.h"
+#include "clock/timesync.h"
 #include "core/device.h"
+#include "net/wifi.h"
 #include "faces/faces.h"
 #include "storage/storage.h"
 #include "timer/snapshot.h"
@@ -46,6 +48,15 @@ uint32_t eventsThisBoot = 0;
 uint32_t bootCounter = 0;
 bool saveDue = false;
 uint32_t lastSaveMs = 0;
+
+// A phase that was RUNNING before the reboot comes back PAUSED; once the clock is synced it
+// continues to its saved end (if nobody flipped the cube in the meantime).
+int64_t pendingEndsAt = timer::NONE;
+char pendingSession[37] = "";
+
+constexpr uint32_t NO_WIFI_FLASH_EVERY_MS = 5000;
+constexpr uint16_t NO_WIFI_FLASH_MS = 150;
+uint32_t lastNoWifiFlashMs = 0;
 uint32_t lastFaceChanges = 0;
 
 // Screen: follows the face (DISPLAY / TECH); the blue button switches manually until the next flip.
@@ -69,7 +80,7 @@ void onTimerEvent(EventType type, faces::Face face);
 timer::TimerCore core([] {
     timer::Env env;
     env.monotonicMs = [] { return device::monotonicMs(); };
-    env.epochMs = [] { return timer::NONE; };  // SNTP comes in stage 3
+    env.epochMs = [] { return timesync::epochMs(); };  // NONE until SNTP synced
     env.newUuid = [](char out[37]) { device::newUuid(out); };
     env.onEvent = [](EventType t, faces::Face f) { onTimerEvent(t, f); };
     return env;
@@ -185,10 +196,46 @@ void restoreTimer() {
         Serial.println("timer: saved idle, starting fresh");
         return;
     }
+    const bool exact = saved.status == Status::Running && saved.endsAtEpoch != timer::NONE;
     Serial.printf("timer: restoring %s %s, %lu s left%s\n", timer::name(saved.mode), timer::name(saved.status),
                   (unsigned long)saved.remainingSeconds,
-                  saved.status == Status::Running ? " (no clock: comes back paused)" : "");
+                  saved.status != Status::Running ? ""
+                  : exact ? " (paused until the clock is synced, then continues to the saved end)"
+                          : " (no end time saved: stays paused)");
     core.restoreAndSync(timer::restoredState(saved, timer::NONE));
+    if (exact) {
+        pendingEndsAt = saved.endsAtEpoch;
+        memcpy(pendingSession, saved.sessionId, sizeof(pendingSession));
+    }
+}
+
+void continuePendingPhase() {
+    if (pendingEndsAt == timer::NONE || !timesync::synced()) return;
+    const timer::State& s = core.state();
+    if (s.status == Status::Paused && strcmp(s.sessionId, pendingSession) == 0) {
+        Serial.println("timer: clock synced, continuing the phase to its saved end");
+        core.continueUntilEpoch(pendingEndsAt);
+    } else {
+        Serial.println("timer: clock synced, but the timer changed since the reboot - leaving it");
+    }
+    pendingEndsAt = timer::NONE;
+}
+
+void flashIfNoWifi(uint32_t now) {
+    // Only when the cube should be online: credentials stored but no connection.
+    if (wifi::state() == wifi::State::Off || wifi::connected()) return;
+    if (now - lastNoWifiFlashMs < NO_WIFI_FLASH_EVERY_MS) return;
+    lastNoWifiFlashMs = now;
+    rgb::flash(rgb::NO_WIFI, NO_WIFI_FLASH_MS);
+}
+
+void describeWifi(char* out, size_t size) {
+    switch (wifi::state()) {
+        case wifi::State::Off: snprintf(out, size, "not set"); break;
+        case wifi::State::Connecting: snprintf(out, size, "connecting"); break;
+        case wifi::State::Waiting: snprintf(out, size, "%s", wifi::name(wifi::lastFailure())); break;
+        case wifi::State::Connected: snprintf(out, size, "%.12s %d dBm", wifi::ssid(), wifi::rssi()); break;
+    }
 }
 
 #ifdef TELOS_DEBUG
@@ -292,7 +339,41 @@ void cmdReboot(const char*) {
     ESP.restart();
 }
 
+char newSsid[33] = "";
+
+void cmdWifi(const char* a) {
+    if (strncmp(a, "set ", 4) == 0 && strlen(a + 4) > 0) {
+        if (strlen(a + 4) > 32) {
+            Serial.println("SSID is longer than 32 bytes");
+            return;
+        }
+        strncpy(newSsid, a + 4, sizeof(newSsid) - 1);
+        console::readSecret("password (empty for an open network): ", [](const char* password) {
+            if (strlen(password) > 64) {
+                Serial.println("password is longer than 64 bytes, not saved");
+                return;
+            }
+            wifi::setCredentials(newSsid, password);
+            Serial.printf("saved Wi-Fi '%s', connecting\n", newSsid);  // never the password
+        });
+        return;
+    }
+    if (strcmp(a, "forget") == 0) {
+        wifi::forget();
+        Serial.println("Wi-Fi credentials erased");
+        return;
+    }
+    char line[48];
+    describeWifi(line, sizeof(line));
+    char now[8];
+    timesync::formatLocal(timesync::epochMs(), now, sizeof(now));
+    Serial.printf("Wi-Fi: %s (%s), clock: %s\n", wifi::name(wifi::state()), line,
+                  timesync::synced() ? now : "not synced");
+    Serial.println("usage: wifi | wifi set <ssid> | wifi forget");
+}
+
 void setupConsole() {
+    console::add("wifi", "wifi | wifi set <ssid> | wifi forget", cmdWifi);
     console::add("status", "boot counter, timer, calibration", cmdStatus);
     console::add("face", "face <axis> <FACE>, e.g. face -X WORK", cmdFace);
     console::add("rot", "rot <axis> <0|90|180|270|keep>", cmdRot);
@@ -307,7 +388,7 @@ void setupConsole() {
 void setup() {
     Serial.begin(115200);
     delay(200);
-    Serial.printf("\n=== Telos cube %s, hardware id %s, offline mode ===\n", FIRMWARE_VERSION, device::hardwareId());
+    Serial.printf("\n=== Telos cube %s, hardware id %s ===\n", FIRMWARE_VERSION, device::hardwareId());
     storage::begin();
     bootCounter = storage::bumpBootCounter();
     Serial.printf("boot #%lu\n", (unsigned long)bootCounter);
@@ -329,6 +410,8 @@ void setup() {
                   (unsigned long)d.shortBreakSeconds, (unsigned long)d.longBreakSeconds);
 
     restoreTimer();
+    timesync::begin();
+    wifi::begin();
     if (!faces::begin()) Serial.println("MPU6050 not found, faces disabled until it answers");
 #ifdef TELOS_DEBUG
     setupConsole();
@@ -353,16 +436,29 @@ void loop() {
                       screens::rotation() * 90);
         core.applyFace(r.face);
     }
+    wifi::loop(now);
+    timesync::loop();
+    continuePendingPhase();
     core.tick();
 
     if (!manualScreen) screen = screens::forFace(core.face());
     if (toast && int32_t(now - toastUntilMs) >= 0) toast = nullptr;
 
-    screens::View v{screen, &core.state(), core.remainingSeconds(), core.face(), r.sensorOk, eventsThisBoot, toast};
+    char wifiLine[40];
+    describeWifi(wifiLine, sizeof(wifiLine));
+    char timeLine[12];
+    timesync::formatLocal(timesync::epochMs(), timeLine, sizeof(timeLine));
+    if (!timesync::synced()) snprintf(timeLine, sizeof(timeLine), "not synced");
+    char endsAt[8];
+    timesync::formatLocal(core.epochEndsAt(), endsAt, sizeof(endsAt));
+
+    screens::View v{screen,  &core.state(),     core.remainingSeconds(), core.face(), r.sensorOk, eventsThisBoot,
+                    toast,   wifiLine,          wifi::connected(),       timeLine,    endsAt};
     screens::render(v);
 
     saveTimerIfDue(now);
     updateLed();
+    flashIfNoWifi(now);
     rgb::update(now);
     vibration::update(now);
     buzzer::update(now);
