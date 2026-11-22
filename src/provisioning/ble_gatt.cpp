@@ -22,6 +22,12 @@ char bleName[20] = "";
 
 NimBLECharacteristic* statusChr = nullptr;
 
+// NimBLE's setValue(const T&) copies sizeof(T) bytes: a char* would store the pointer and a
+// char[] the whole array with its trailing zeros. Always pass the text bytes explicitly.
+void setText(NimBLECharacteristic* c, const char* s) {
+    c->setValue(reinterpret_cast<const uint8_t*>(s), strlen(s));
+}
+
 class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer*) override {
         connected = true;
@@ -42,7 +48,8 @@ class ProvisioningCallbacks : public NimBLECharacteristicCallbacks {
         hasPayload = true;
         portEXIT_CRITICAL(&lock);
         // Wipe the stack's copy of the Wi-Fi password.
-        c->setValue("");
+        static const uint8_t none = 0;
+        c->setValue(&none, 0);
     }
 };
 
@@ -78,14 +85,14 @@ void start(const char* deviceInfoJson) {
     NimBLEService* svc = server->createService(SERVICE_UUID);
 
     NimBLECharacteristic* info = svc->createCharacteristic(INFO_UUID, NIMBLE_PROPERTY::READ);
-    info->setValue(deviceInfoJson);
+    setText(info, deviceInfoJson);
 
     NimBLECharacteristic* prov = svc->createCharacteristic(
         PROVISIONING_UUID, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_ENC, MAX_PAYLOAD);
     prov->setCallbacks(&provisioningCallbacks);
 
     statusChr = svc->createCharacteristic(STATUS_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
-    statusChr->setValue("{\"state\":\"IDLE\",\"errorCode\":null}");
+    setText(statusChr, "{\"state\":\"IDLE\",\"errorCode\":null}");
 
     NimBLECharacteristic* control = svc->createCharacteristic(CONTROL_UUID, NIMBLE_PROPERTY::WRITE);
     control->setCallbacks(&controlCallbacks);
@@ -122,7 +129,7 @@ void setStatus(const char* state, const char* errorCode) {
     char json[96];
     if (errorCode) snprintf(json, sizeof(json), "{\"state\":\"%s\",\"errorCode\":\"%s\"}", state, errorCode);
     else snprintf(json, sizeof(json), "{\"state\":\"%s\",\"errorCode\":null}", state);
-    statusChr->setValue(json);
+    setText(statusChr, json);
     statusChr->notify();
     log_i("BLE status: %s", json);
 }
