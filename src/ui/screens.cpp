@@ -154,8 +154,8 @@ void techStatic(const View& v) {
     t().drawString("TECH", 120, 11, 2);
     t().setTextColor(TFT_DARKGREY, TFT_BLACK);
     t().setTextDatum(TL_DATUM);
-    const char* labels[] = {"firmware", "hardware id", "uptime", "free heap", "events", "Wi-Fi", "time", "sensor"};
-    for (int i = 0; i < 8; i++) t().drawString(labels[i], 8, 28 + i * 22, 2);
+    const char* labels[] = {"firmware", "hardware id", "uptime", "free heap", "events", "Wi-Fi", "server", "time", "sensor"};
+    for (int i = 0; i < 9; i++) t().drawString(labels[i], 8, 27 + i * 20, 2);
     if (!v.toast) bottomLine("blue 3 s: Bluetooth, 10 s: reset", TFT_DARKGREY);
 }
 
@@ -163,7 +163,7 @@ void techDynamic(const View& v) {
     char buf[32];
     const uint32_t up = uint32_t(device::monotonicMs() / 1000);
     const int x = 232;
-    auto y = [](int row) { return 36 + row * 22; };
+    auto y = [](int row) { return 35 + row * 20; };
     text(FIRMWARE_VERSION, x, y(0), 2, TFT_WHITE, MR_DATUM, 120);
     text(device::hardwareId(), x, y(1), 2, TFT_WHITE, MR_DATUM, 120);
     snprintf(buf, sizeof(buf), "%lu:%02lu:%02lu", (unsigned long)(up / 3600), (unsigned long)(up / 60 % 60),
@@ -174,8 +174,10 @@ void techDynamic(const View& v) {
     snprintf(buf, sizeof(buf), "%lu", (unsigned long)v.eventsThisBoot);
     text(buf, x, y(4), 2, TFT_WHITE, MR_DATUM, 120);
     text(v.wifiLine, x, y(5), 2, v.wifiOk ? TFT_GREEN : TFT_ORANGE, MR_DATUM, 140);
-    text(v.timeLine, x, y(6), 2, TFT_WHITE, MR_DATUM, 120);
-    text(v.sensorOk ? "MPU6050 ok" : "MPU6050 missing", x, y(7), 2, v.sensorOk ? TFT_GREEN : TFT_RED, MR_DATUM, 120);
+    const bool serverOnline = strcmp(v.serverLine, "online") == 0;
+    text(v.serverLine, x, y(6), 2, serverOnline ? TFT_GREEN : TFT_ORANGE, MR_DATUM, 120);
+    text(v.timeLine, x, y(7), 2, TFT_WHITE, MR_DATUM, 120);
+    text(v.sensorOk ? "MPU6050 ok" : "MPU6050 missing", x, y(8), 2, v.sensorOk ? TFT_GREEN : TFT_RED, MR_DATUM, 120);
 }
 
 // --- Provisioning (no device secret yet, or blue button held 3 s) ------------

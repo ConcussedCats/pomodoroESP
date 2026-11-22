@@ -12,6 +12,7 @@ namespace timer {
 
 enum class Mode : uint8_t { Work, ShortBreak, LongBreak };
 enum class Status : uint8_t { Running, Paused, Stopped, Finished };
+enum class FaceAction : uint8_t { StartWork, StartShortBreak, StartLongBreak, Pause, None };
 
 enum class EventType : uint8_t { FaceChanged, Started, Paused, Resumed, Stopped, Finished, StateSync };
 
@@ -66,10 +67,13 @@ public:
     void configure(const Durations& d);
     const Durations& durations() const { return durations_; }
     uint32_t durationOf(Mode mode) const;
+    void configureFaceAction(faces::Face face, FaceAction action);
+    FaceAction faceAction(faces::Face face) const;
 
     // serverTime - monotonicNow, learned from server responses (PROTOCOL.md 1.6).
     void setClockOffset(int64_t offsetMs) { clockOffset_ = offsetMs; hasClockOffset_ = true; }
     bool hasClockOffset() const { return hasClockOffset_; }
+    int64_t clockOffset() const { return clockOffset_; }
 
     // A new accepted face. The first face after boot is only a baseline (no timer action):
     // a cube lying on WORK when it is switched on must not start a session by itself.
@@ -115,6 +119,9 @@ private:
     State state_;
     faces::Face face_ = faces::Face::Unknown;
     bool hasBaseline_ = false;
+    FaceAction faceActions_[6] = {FaceAction::StartWork, FaceAction::StartShortBreak,
+                                  FaceAction::StartLongBreak, FaceAction::Pause,
+                                  FaceAction::None, FaceAction::None};
     int64_t clockOffset_ = 0;
     bool hasClockOffset_ = false;
 };
@@ -122,6 +129,7 @@ private:
 const char* name(Mode mode);
 const char* name(Status status);
 const char* name(EventType type);
+const char* name(FaceAction action);
 bool modeForFace(faces::Face face, Mode& out);
 // Local guess of the next phase for the FINISHED screen while the server's
 // suggestedNextMode is unknown (offline): after work a short break, after a break work.

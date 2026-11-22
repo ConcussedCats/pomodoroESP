@@ -17,6 +17,8 @@ constexpr const char* KEY_ROT = "rotation";
 constexpr const char* KEY_SECRET = "secret";
 constexpr const char* KEY_DEVICE_ID = "device_id";
 constexpr const char* KEY_API = "api_base";
+constexpr const char* KEY_CONFIG = "config";
+constexpr const char* KEY_CONFIG_HASH = "config_hash";
 
 Preferences prefs;
 bool ready = false;
@@ -105,6 +107,21 @@ void clearDevice() {
     if (!ready) return;
     prefs.remove(KEY_SECRET);
     prefs.remove(KEY_DEVICE_ID);
+    prefs.remove(KEY_CONFIG);
+    prefs.remove(KEY_CONFIG_HASH);
+}
+
+bool loadConfig(char* json, size_t jsonSize, char hash[65]) {
+    if (!ready || !json || jsonSize == 0 || !hash) return false;
+    const bool hasJson = loadString(KEY_CONFIG, json, jsonSize);
+    const bool hasHash = loadString(KEY_CONFIG_HASH, hash, 65);
+    return hasJson && hasHash && json[0] != '\0' && hash[0] != '\0';
+}
+
+void saveConfig(const char* json, const char* hash) {
+    if (!ready || !json || !hash || !json[0] || !hash[0]) return;
+    prefs.putString(KEY_CONFIG, json);
+    prefs.putString(KEY_CONFIG_HASH, hash);
 }
 
 bool loadFaceMap(faces::Face out[6]) {
