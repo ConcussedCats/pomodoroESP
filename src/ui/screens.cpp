@@ -126,6 +126,7 @@ void infoStatic(const View& v) {
     t().drawString("phase", 12, 132, 2);
     t().drawString("next", 12, 152, 2);
     t().drawString("session", 12, 172, 2);
+    t().drawString("ends at", 12, 192, 2);
     if (!v.toast) bottomLine("flip to a mode face to go on", TFT_DARKGREY);
 }
 
@@ -139,6 +140,7 @@ void infoDynamic(const View& v) {
     text(modeTitle(timer::localNextMode(st.mode)), 228, 160, 2, TFT_LIGHTGREY, MR_DATUM, 150);
     snprintf(buf, sizeof(buf), "%.8s", st.sessionId[0] ? st.sessionId : "-");
     text(buf, 228, 180, 2, TFT_LIGHTGREY, MR_DATUM, 150);
+    text(v.endsAt && v.endsAt[0] ? v.endsAt : "-", 228, 200, 2, TFT_LIGHTGREY, MR_DATUM, 150);
 }
 
 // --- Tech (TECH face) -----------------------------------------------------
@@ -151,8 +153,8 @@ void techStatic(const View& v) {
     t().drawString("TECH", 120, 11, 2);
     t().setTextColor(TFT_DARKGREY, TFT_BLACK);
     t().setTextDatum(TL_DATUM);
-    const char* labels[] = {"firmware", "hardware id", "uptime", "free heap", "events", "Wi-Fi", "sensor"};
-    for (int i = 0; i < 7; i++) t().drawString(labels[i], 8, 30 + i * 24, 2);
+    const char* labels[] = {"firmware", "hardware id", "uptime", "free heap", "events", "Wi-Fi", "time", "sensor"};
+    for (int i = 0; i < 8; i++) t().drawString(labels[i], 8, 28 + i * 22, 2);
     if (!v.toast) bottomLine("blue 3 s: Bluetooth, 10 s: reset", TFT_DARKGREY);
 }
 
@@ -160,17 +162,19 @@ void techDynamic(const View& v) {
     char buf[32];
     const uint32_t up = uint32_t(device::monotonicMs() / 1000);
     const int x = 232;
-    text(FIRMWARE_VERSION, x, 38, 2, TFT_WHITE, MR_DATUM, 120);
-    text(device::hardwareId(), x, 62, 2, TFT_WHITE, MR_DATUM, 120);
+    auto y = [](int row) { return 36 + row * 22; };
+    text(FIRMWARE_VERSION, x, y(0), 2, TFT_WHITE, MR_DATUM, 120);
+    text(device::hardwareId(), x, y(1), 2, TFT_WHITE, MR_DATUM, 120);
     snprintf(buf, sizeof(buf), "%lu:%02lu:%02lu", (unsigned long)(up / 3600), (unsigned long)(up / 60 % 60),
              (unsigned long)(up % 60));
-    text(buf, x, 86, 2, TFT_WHITE, MR_DATUM, 120);
+    text(buf, x, y(2), 2, TFT_WHITE, MR_DATUM, 120);
     snprintf(buf, sizeof(buf), "%lu B", (unsigned long)esp_get_free_heap_size());
-    text(buf, x, 110, 2, TFT_WHITE, MR_DATUM, 120);
+    text(buf, x, y(3), 2, TFT_WHITE, MR_DATUM, 120);
     snprintf(buf, sizeof(buf), "%lu", (unsigned long)v.eventsThisBoot);
-    text(buf, x, 134, 2, TFT_WHITE, MR_DATUM, 120);
-    text("offline", x, 158, 2, TFT_ORANGE, MR_DATUM, 120);
-    text(v.sensorOk ? "MPU6050 ok" : "MPU6050 missing", x, 182, 2, v.sensorOk ? TFT_GREEN : TFT_RED, MR_DATUM, 120);
+    text(buf, x, y(4), 2, TFT_WHITE, MR_DATUM, 120);
+    text(v.wifiLine, x, y(5), 2, v.wifiOk ? TFT_GREEN : TFT_ORANGE, MR_DATUM, 140);
+    text(v.timeLine, x, y(6), 2, TFT_WHITE, MR_DATUM, 120);
+    text(v.sensorOk ? "MPU6050 ok" : "MPU6050 missing", x, y(7), 2, v.sensorOk ? TFT_GREEN : TFT_RED, MR_DATUM, 120);
 }
 
 }  // namespace
