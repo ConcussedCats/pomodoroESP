@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "faces/faces.h"
+#include "events/event_queue.h"
 #include "timer/snapshot.h"
 
 // NVS namespace "telos" (FIRMWARE-SPEC 3.1). Plain NVS: flash encryption is not enabled on
@@ -31,6 +32,12 @@ void clearDevice();  // 401 DEVICE_UNAUTHORIZED / unbind: back to provisioning
 // Last successfully parsed and applied server config.
 bool loadConfig(char* json, size_t jsonSize, char hash[65]);
 void saveConfig(const char* json, const char* hash);
+
+// Persistent ring slots for the outbound event queue (stage 6).
+bool loadEventMeta(uint8_t& head, uint8_t& count);
+void saveEventMeta(uint8_t head, uint8_t count);
+bool loadEventSlot(uint8_t slot, events::Event& event);
+void saveEventSlot(uint8_t slot, const events::Event& event);
 
 // Calibration of the physical cube: face per board orientation, screen rotation per orientation.
 bool loadFaceMap(faces::Face out[6]);

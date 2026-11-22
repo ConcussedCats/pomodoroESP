@@ -8,6 +8,8 @@
 namespace devicesync {
 
 constexpr size_t CONFIG_JSON_SIZE = 3072;
+constexpr size_t EVENT_REQUEST_SIZE = 4096;
+constexpr size_t EVENT_RESPONSE_SIZE = 2048;
 
 enum class ServerStatus : uint8_t { Disabled, Offline, Contacting, Online };
 
@@ -27,12 +29,16 @@ struct Update {
     uint32_t pendingCommands = 0;
     bool hasConfig = false;
     char configJson[CONFIG_JSON_SIZE] = "";
+    bool hasEventResponse = false;
+    char eventResponse[EVENT_RESPONSE_SIZE] = "";
 };
 
 // Starts the blocking HTTPS worker pinned to core 0. TimerCore remains owned by app::loop.
 void begin();
 // Call on the app task after pairing or clearing the device. The worker never touches NVS.
 void reloadCredentials();
+void publishEvents(const char* requestJson);  // nullptr / empty = queue empty
+void retryEvents();  // response did not acknowledge the oldest event
 void publish(const Snapshot& snapshot);
 bool takeUpdate(Update& out);
 ServerStatus status();

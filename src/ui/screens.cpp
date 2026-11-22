@@ -171,7 +171,7 @@ void techDynamic(const View& v) {
     text(buf, x, y(2), 2, TFT_WHITE, MR_DATUM, 120);
     snprintf(buf, sizeof(buf), "%lu B", (unsigned long)esp_get_free_heap_size());
     text(buf, x, y(3), 2, TFT_WHITE, MR_DATUM, 120);
-    snprintf(buf, sizeof(buf), "%lu", (unsigned long)v.eventsThisBoot);
+    snprintf(buf, sizeof(buf), "%lu", (unsigned long)v.queuedEvents);
     text(buf, x, y(4), 2, TFT_WHITE, MR_DATUM, 120);
     text(v.wifiLine, x, y(5), 2, v.wifiOk ? TFT_GREEN : TFT_ORANGE, MR_DATUM, 140);
     const bool serverOnline = strcmp(v.serverLine, "online") == 0;

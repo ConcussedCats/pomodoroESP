@@ -11,8 +11,8 @@ struct Color {
 
 constexpr Color OFF{0, 0, 0};
 constexpr Color WORK{255, 50, 30};         // red-coral
-constexpr Color SHORT_BREAK{0, 220, 50};   // green
-constexpr Color LONG_BREAK{0, 70, 255};    // blue
+constexpr Color SHORT_BREAK{52, 152, 219}; // blue, matches the web timer
+constexpr Color LONG_BREAK{46, 204, 113};  // green, matches the web timer
 constexpr Color PROVISIONING{0, 0, 255};
 constexpr Color NO_WIFI{255, 160, 0};      // yellow
 

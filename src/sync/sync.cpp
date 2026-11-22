@@ -31,6 +31,13 @@ struct Credentials {
 };
 Credentials credentials;
 
+struct EventRequest {
+    uint32_t generation = 0;
+    bool available = false;
+    char json[EVENT_REQUEST_SIZE] = "";
+};
+EventRequest eventRequest;
+
 void setStatus(ServerStatus value) {
     serverStatus = value;
 }
@@ -44,7 +51,20 @@ bool unauthorized(const https::Response& response) {
 
 void deliver(const Update& update) {
     xSemaphoreTake(sharedMutex, portMAX_DELAY);
-    pending = update;
+    pending.unauthorized = pending.unauthorized || update.unauthorized;
+    if (update.hasServerTime) {
+        pending.hasServerTime = true;
+        pending.serverTime = update.serverTime;
+    }
+    if (update.pendingCommands) pending.pendingCommands = update.pendingCommands;
+    if (update.hasConfig) {
+        pending.hasConfig = true;
+        memcpy(pending.configJson, update.configJson, sizeof(pending.configJson));
+    }
+    if (update.hasEventResponse) {
+        pending.hasEventResponse = true;
+        memcpy(pending.eventResponse, update.eventResponse, sizeof(pending.eventResponse));
+    }
     hasUpdate = true;
     xSemaphoreGive(sharedMutex);
 }
@@ -64,10 +84,19 @@ Credentials currentCredentials() {
     return copy;
 }
 
+EventRequest currentEvents() {
+    xSemaphoreTake(sharedMutex, portMAX_DELAY);
+    const EventRequest copy = eventRequest;
+    xSemaphoreGive(sharedMutex);
+    return copy;
+}
+
 void worker(void*) {
     uint32_t nextHeartbeatMs = 0;
     uint32_t heartbeatSeconds = DEFAULT_HEARTBEAT_SECONDS;
     uint32_t commandPollSeconds = 3;
+    uint32_t sentEventGeneration = 0;
+    uint32_t nextEventRetryMs = 0;
     bool wasReady = false;
     for (;;) {
         Snapshot state;
@@ -86,9 +115,46 @@ void worker(void*) {
         }
         if (!wasReady) {
             nextHeartbeatMs = 0;  // heartbeat immediately after reconnect
+            sentEventGeneration = 0;
+            nextEventRetryMs = 0;
             wasReady = true;
         }
         const uint32_t now = millis();
+
+        EventRequest queued = currentEvents();
+        if (queued.available && queued.generation != sentEventGeneration &&
+            (nextEventRetryMs == 0 || int32_t(now - nextEventRetryMs) >= 0)) {
+            setStatus(ServerStatus::Contacting);
+            const https::Response response =
+                https::request("POST", auth.apiBase, "/api/device/events", queued.json, auth.secret);
+            Update update;
+            if (unauthorized(response)) {
+                update.unauthorized = true;
+                deliver(update);
+                setStatus(ServerStatus::Disabled);
+                wasReady = false;
+                continue;
+            }
+            if (response.status == 200 && response.body.length() < EVENT_RESPONSE_SIZE) {
+                update.hasEventResponse = true;
+                memcpy(update.eventResponse, response.body.c_str(), response.body.length() + 1);
+                JsonDocument responseDoc;
+                if (deserializeJson(responseDoc, response.body) == DeserializationError::Ok &&
+                    responseDoc["state"]["serverTime"].is<int64_t>()) {
+                    update.hasServerTime = true;
+                    update.serverTime = responseDoc["state"]["serverTime"].as<int64_t>();
+                }
+                deliver(update);
+                sentEventGeneration = queued.generation;
+                nextEventRetryMs = 0;
+                setStatus(ServerStatus::Online);
+                continue;  // reconnect order: events first, heartbeat on the next pass
+            }
+            log_w("sync: event upload failed, HTTP %d", response.status);
+            nextEventRetryMs = now + RETRY_MS;
+            if (response.status == 0) setStatus(ServerStatus::Offline);
+        }
+
         if (nextHeartbeatMs != 0 && int32_t(now - nextHeartbeatMs) < 0) {
             vTaskDelay(pdMS_TO_TICKS(IDLE_MS));
             continue;
@@ -185,7 +251,7 @@ void worker(void*) {
 void begin() {
     sharedMutex = xSemaphoreCreateMutex();
     reloadCredentials();
-    xTaskCreatePinnedToCore(worker, "telos-sync", 12288, nullptr, 1, nullptr, 0);
+    xTaskCreatePinnedToCore(worker, "telos-sync", 32768, nullptr, 1, nullptr, 0);
 }
 
 void reloadCredentials() {
@@ -200,6 +266,29 @@ void reloadCredentials() {
     memset(next.secret, 0, sizeof(next.secret));
 }
 
+void publishEvents(const char* json) {
+    xSemaphoreTake(sharedMutex, portMAX_DELAY);
+    const bool available = json && json[0];
+    if (available != eventRequest.available ||
+        (available && strncmp(eventRequest.json, json, sizeof(eventRequest.json)) != 0)) {
+        eventRequest.available = available;
+        if (available) snprintf(eventRequest.json, sizeof(eventRequest.json), "%s", json);
+        else eventRequest.json[0] = '\0';
+        eventRequest.generation++;
+        if (eventRequest.generation == 0) eventRequest.generation = 1;
+    }
+    xSemaphoreGive(sharedMutex);
+}
+
+void retryEvents() {
+    xSemaphoreTake(sharedMutex, portMAX_DELAY);
+    if (eventRequest.available) {
+        eventRequest.generation++;
+        if (eventRequest.generation == 0) eventRequest.generation = 1;
+    }
+    xSemaphoreGive(sharedMutex);
+}
+
 void publish(const Snapshot& value) {
     xSemaphoreTake(sharedMutex, portMAX_DELAY);
     latest = value;
@@ -212,6 +301,7 @@ bool takeUpdate(Update& out) {
     const bool available = hasUpdate;
     if (available) {
         out = pending;
+        pending = Update{};
         hasUpdate = false;
     }
     xSemaphoreGive(sharedMutex);

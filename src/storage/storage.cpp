@@ -2,12 +2,15 @@
 
 #include <Arduino.h>
 #include <Preferences.h>
+#include <nvs_flash.h>
 #include <string.h>
 
 namespace storage {
 namespace {
 
 constexpr const char* NS = "telos";
+constexpr const char* EVENT_NS = "queue";
+constexpr const char* EVENT_PARTITION = "events";
 constexpr const char* KEY_BOOTS = "boot_counter";
 constexpr const char* KEY_TIMER = "timer";
 constexpr const char* KEY_SSID = "wifi_ssid";
@@ -19,9 +22,18 @@ constexpr const char* KEY_DEVICE_ID = "device_id";
 constexpr const char* KEY_API = "api_base";
 constexpr const char* KEY_CONFIG = "config";
 constexpr const char* KEY_CONFIG_HASH = "config_hash";
+constexpr const char* KEY_EVENT_META = "events_meta";
+
+struct EventMeta {
+    uint8_t version;
+    uint8_t head;
+    uint8_t count;
+};
 
 Preferences prefs;
+Preferences eventPrefs;
 bool ready = false;
+bool eventsReady = false;
 timer::Saved lastTimer{};
 bool hasLastTimer = false;
 
@@ -37,7 +49,13 @@ bool loadString(const char* key, char* out, size_t size) {
 bool begin() {
     ready = prefs.begin(NS, false);
     if (!ready) log_e("NVS namespace '%s' could not be opened", NS);
-    return ready;
+    esp_err_t eventInit = nvs_flash_init_partition(EVENT_PARTITION);
+    if (eventInit == ESP_ERR_NVS_NO_FREE_PAGES || eventInit == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        nvs_flash_erase_partition(EVENT_PARTITION);
+    }
+    eventsReady = eventPrefs.begin(EVENT_NS, false, EVENT_PARTITION);
+    if (!eventsReady) log_e("NVS event partition could not be opened");
+    return ready && eventsReady;
 }
 
 uint32_t bumpBootCounter() {
@@ -124,6 +142,38 @@ void saveConfig(const char* json, const char* hash) {
     prefs.putString(KEY_CONFIG_HASH, hash);
 }
 
+bool loadEventMeta(uint8_t& head, uint8_t& count) {
+    if (!eventsReady || !eventPrefs.isKey(KEY_EVENT_META) || eventPrefs.getBytesLength(KEY_EVENT_META) != sizeof(EventMeta)) return false;
+    EventMeta meta{};
+    eventPrefs.getBytes(KEY_EVENT_META, &meta, sizeof(meta));
+    if (meta.version != 1 || meta.head >= events::CAPACITY || meta.count > events::CAPACITY) return false;
+    head = meta.head;
+    count = meta.count;
+    return true;
+}
+
+void saveEventMeta(uint8_t head, uint8_t count) {
+    if (!eventsReady) return;
+    const EventMeta meta{1, head, count};
+    eventPrefs.putBytes(KEY_EVENT_META, &meta, sizeof(meta));
+}
+
+bool loadEventSlot(uint8_t slot, events::Event& event) {
+    if (!eventsReady || slot >= events::CAPACITY) return false;
+    char key[12];
+    snprintf(key, sizeof(key), "event_%02u", slot);
+    if (!eventPrefs.isKey(key) || eventPrefs.getBytesLength(key) != sizeof(event)) return false;
+    eventPrefs.getBytes(key, &event, sizeof(event));
+    return true;
+}
+
+void saveEventSlot(uint8_t slot, const events::Event& event) {
+    if (!eventsReady || slot >= events::CAPACITY) return;
+    char key[12];
+    snprintf(key, sizeof(key), "event_%02u", slot);
+    eventPrefs.putBytes(key, &event, sizeof(event));
+}
+
 bool loadFaceMap(faces::Face out[6]) {
     if (!ready || !prefs.isKey(KEY_FACES) || prefs.getBytesLength(KEY_FACES) != 6) return false;
     uint8_t raw[6];
@@ -167,6 +217,7 @@ void clearCalibration() {
 void wipe() {
     if (!ready) return;
     prefs.clear();
+    if (eventsReady) eventPrefs.clear();
     hasLastTimer = false;
 }
 
