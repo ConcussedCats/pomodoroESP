@@ -67,6 +67,48 @@ void test_empty_and_invalid_command_responses_are_distinct() {
     TEST_ASSERT_EQUAL(commands::ParseResult::Invalid, commands::parseLatest("not-json", command));
 }
 
+void test_parse_set_state_running_target() {
+    const char* json = R"({"commands":[{"commandId":"00000000-0000-4000-8000-000000000002","type":"SET_STATE","mode":"WORK","targetState":{"status":"RUNNING","durationSeconds":1500,"remainingSeconds":1121,"endsAt":1761151121000,"sessionId":"c7e1aaaa-bbbb-4ccc-8ddd-eeeeffff0000"},"createdAt":1761150000000,"expiresAt":1761150030000}]})";
+    commands::Command command;
+    TEST_ASSERT_EQUAL(commands::ParseResult::Valid, commands::parseLatest(json, command));
+    TEST_ASSERT_EQUAL(timer::CommandType::SetState, command.type);
+    TEST_ASSERT_TRUE(command.hasMode);
+    TEST_ASSERT_EQUAL(timer::Mode::Work, command.mode);
+    TEST_ASSERT_TRUE(command.hasTarget);
+    TEST_ASSERT_EQUAL(timer::Status::Running, command.target.status);
+    TEST_ASSERT_EQUAL_UINT32(1500, command.target.durationSeconds);
+    TEST_ASSERT_EQUAL_INT64(1121, command.target.remainingSeconds);
+    TEST_ASSERT_EQUAL_INT64(1761151121000, command.target.endsAt);
+    TEST_ASSERT_EQUAL_STRING("c7e1aaaa-bbbb-4ccc-8ddd-eeeeffff0000", command.target.sessionId);
+}
+
+void test_parse_set_state_paused_target_without_end() {
+    const char* json = R"({"commands":[{"commandId":"00000000-0000-4000-8000-000000000003","type":"SET_STATE","mode":"SHORT_BREAK","targetState":{"status":"PAUSED","durationSeconds":300,"remainingSeconds":140,"endsAt":null,"sessionId":"c7e1aaaa-bbbb-4ccc-8ddd-eeeeffff0000"},"expiresAt":1761150030000}]})";
+    commands::Command command;
+    TEST_ASSERT_EQUAL(commands::ParseResult::Valid, commands::parseLatest(json, command));
+    TEST_ASSERT_EQUAL(timer::Status::Paused, command.target.status);
+    TEST_ASSERT_EQUAL_INT64(timer::NONE, command.target.endsAt);
+}
+
+void test_set_state_requires_a_well_formed_target() {
+    commands::Command command;
+    TEST_ASSERT_EQUAL(commands::ParseResult::Invalid,
+                      commands::parseLatest(R"({"commands":[{"commandId":"x","type":"SET_STATE","mode":"WORK","expiresAt":10}]})", command));
+    TEST_ASSERT_EQUAL(commands::ParseResult::Invalid,
+                      commands::parseLatest(R"({"commands":[{"commandId":"x","type":"SET_STATE","mode":"WORK","targetState":{"status":"STOPPED","durationSeconds":300,"remainingSeconds":10,"sessionId":"s"},"expiresAt":10}]})", command));
+    TEST_ASSERT_EQUAL(commands::ParseResult::Invalid,
+                      commands::parseLatest(R"({"commands":[{"commandId":"x","type":"SET_STATE","mode":"WORK","targetState":{"status":"RUNNING","durationSeconds":300,"remainingSeconds":10,"endsAt":"later","sessionId":"s"},"expiresAt":10}]})", command));
+}
+
+void test_release_has_no_target_state() {
+    commands::Command command;
+    TEST_ASSERT_EQUAL(commands::ParseResult::Valid,
+                      commands::parseLatest(R"({"commands":[{"commandId":"release","type":"RELEASE","mode":null,"expiresAt":10}]})", command));
+    TEST_ASSERT_EQUAL(timer::CommandType::Release, command.type);
+    TEST_ASSERT_FALSE(command.hasMode);
+    TEST_ASSERT_FALSE(command.hasTarget);
+}
+
 void test_ack_contains_exact_resulting_state() {
     commands::Ack ack = makeAck(1);
     char json[1024];
@@ -113,6 +155,10 @@ int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_parse_latest_command_and_mode);
     RUN_TEST(test_empty_and_invalid_command_responses_are_distinct);
+    RUN_TEST(test_parse_set_state_running_target);
+    RUN_TEST(test_parse_set_state_paused_target_without_end);
+    RUN_TEST(test_set_state_requires_a_well_formed_target);
+    RUN_TEST(test_release_has_no_target_state);
     RUN_TEST(test_ack_contains_exact_resulting_state);
     RUN_TEST(test_cache_survives_restart_and_prevents_duplicate_execution);
     RUN_TEST(test_cache_keeps_only_last_16_results);

@@ -27,6 +27,30 @@ bool parseMode(const char* value, timer::Mode& out) {
     return true;
 }
 
+bool parseStatus(const char* value, timer::Status& out) {
+    if (!value) return false;
+    if (strcmp(value, "RUNNING") == 0) out = timer::Status::Running;
+    else if (strcmp(value, "PAUSED") == 0) out = timer::Status::Paused;
+    else return false;
+    return true;
+}
+
+bool parseTarget(JsonObjectConst value, timer::TargetState& out) {
+    const char* sessionId = value["sessionId"] | "";
+    if (!value["status"].is<const char*>() || !parseStatus(value["status"].as<const char*>(), out.status) ||
+        !value["durationSeconds"].is<uint32_t>() || !value["remainingSeconds"].is<int64_t>() ||
+        sessionId[0] == '\0' || strlen(sessionId) >= sizeof(out.sessionId)) {
+        return false;
+    }
+    out.durationSeconds = value["durationSeconds"].as<uint32_t>();
+    out.remainingSeconds = value["remainingSeconds"].as<int64_t>();
+    if (value["endsAt"].isNull()) out.endsAt = timer::NONE;
+    else if (value["endsAt"].is<int64_t>()) out.endsAt = value["endsAt"].as<int64_t>();
+    else return false;
+    strcpy(out.sessionId, sessionId);
+    return true;
+}
+
 void timestamp(JsonObject object, const char* key, int64_t value) {
     if (value == timer::NONE) object[key] = nullptr;
     else object[key] = value;
@@ -55,6 +79,13 @@ ParseResult parseLatest(const char* json, Command& out) {
     if (!item["mode"].isNull()) {
         if (!parseMode(item["mode"].as<const char*>(), out.mode)) return ParseResult::Invalid;
         out.hasMode = true;
+    }
+    if (out.type == timer::CommandType::SetState) {
+        if (!item["targetState"].is<JsonObjectConst>() ||
+            !parseTarget(item["targetState"].as<JsonObjectConst>(), out.target)) {
+            return ParseResult::Invalid;
+        }
+        out.hasTarget = true;
     }
     return ParseResult::Valid;
 }

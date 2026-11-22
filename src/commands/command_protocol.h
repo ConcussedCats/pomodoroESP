@@ -16,6 +16,8 @@ struct Command {
     timer::CommandType type = timer::CommandType::Unknown;
     bool hasMode = false;
     timer::Mode mode = timer::Mode::Work;
+    bool hasTarget = false;
+    timer::TargetState target{};
     int64_t expiresAt = timer::NONE;
 };
 

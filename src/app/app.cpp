@@ -346,11 +346,10 @@ void processCommands(const char* json) {
     timer::CommandResult result{false, "CLOCK_NOT_SYNCED"};
     if (serverNow != timer::NONE && serverNow >= command.expiresAt) {
         result = {false, "COMMAND_EXPIRED"};
-    } else if (command.type == timer::CommandType::SetState || command.type == timer::CommandType::Release) {
-        result = {false, "UNSUPPORTED_COMMAND"};  // implemented by stage 8
     } else if (serverNow != timer::NONE) {
         remoteCommandActive = true;
-        result = core.applyCommand(command.type, command.hasMode, command.mode, nullptr);
+        result = core.applyCommand(command.type, command.hasMode, command.mode,
+                                   command.hasTarget ? &command.target : nullptr);
         remoteCommandActive = false;
     }
 
